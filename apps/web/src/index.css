@@ -1814,9 +1814,10 @@ body {
   transform-style: preserve-3d;
 }
 .rack-tier {
+  --slot-gap: clamp(2px, 0.5vw, 5px);
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
-  gap: clamp(2px, 0.5vw, 5px);
+  gap: var(--slot-gap);
   padding: 4px 2px 0;
   /* the ledge each tier rests on */
   border-bottom: clamp(7px, 1.5vw, 11px) solid var(--wood-lo);
@@ -1836,7 +1837,14 @@ body {
   background: transparent;
   cursor: pointer;
   touch-action: none;
-  transition: transform 180ms var(--spring);
+  /* while a tile is dragged over the rack, neighbours slide aside by whole slots to make room */
+  translate: calc((100% + var(--slot-gap)) * var(--shift, 0)) 0;
+  transition:
+    transform 180ms var(--spring),
+    translate 200ms cubic-bezier(0.25, 0.8, 0.3, 1);
+}
+.rack.is-settling .rack-slot {
+  transition: none;
 }
 .rack-slot-empty {
   touch-action: manipulation;
@@ -2195,7 +2203,7 @@ body {
     padding: 5px 3px 0;
   }
   .rack-tier {
-    gap: 2px;
+    --slot-gap: 2px;
     padding: 3px 0 0;
   }
   .result-card {

@@ -57,6 +57,38 @@ export function moveInLayout(rack: RackEntry[], id: string, to: number): RackEnt
     .sort((a, b) => a.slot - b.slot);
 }
 
+/**
+ * Put `id` at the boundary in front of slot `to` (or after it), Okey style: if that spot is taken,
+ * the neighbouring tiles in the same row slide one place toward the nearest gap to make room.
+ * Nothing swaps. A full row falls back to swapping.
+ */
+export function insertInLayout(rack: RackEntry[], id: string, to: number, after: boolean): RackEntry[] {
+  const from = rack.find((e) => e.id === id);
+  if (!from) return rack;
+  const occ = new Map(rack.filter((e) => e.id !== id).map((e) => [e.slot, e.id]));
+  if (!occ.has(to)) return to === from.slot ? rack : moveInLayout(rack, id, to);
+  const row = to - (to % SLOTS_PER_ROW);
+  const end = row + SLOTS_PER_ROW;
+  const b = after ? to + 1 : to; // insert between b-1 and b
+  let left = -1;
+  for (let g = b - 1; g >= row; g--) if (!occ.has(g)) { left = g; break; }
+  let right = -1;
+  for (let g = b; g < end; g++) if (!occ.has(g)) { right = g; break; }
+  if (left < 0 && right < 0) return moveInLayout(rack, id, to);
+  const dl = left < 0 ? Infinity : b - 1 - left;
+  const dr = right < 0 ? Infinity : right - b;
+  const useLeft = dl < dr || (dl === dr && !after);
+  const out = new Map(occ);
+  if (useLeft) {
+    for (let g = left; g < b - 1; g++) out.set(g, occ.get(g + 1)!);
+    out.set(b - 1, id);
+  } else {
+    for (let g = right; g > b; g--) out.set(g, occ.get(g - 1)!);
+    out.set(b, id);
+  }
+  return [...out].map(([slot, tile]) => ({ id: tile, slot })).sort((a, c) => a.slot - c.slot);
+}
+
 const rowName = (slot: number) => (slot < SLOTS_PER_ROW ? 'rreshti i sipërm' : 'rreshti i poshtëm');
 const posName = (slot: number) => `${rowName(slot)}, vendi ${(slot % SLOTS_PER_ROW) + 1}`;
 
@@ -73,7 +105,19 @@ export function Rack({ rack, selected, onSelect, onLayout, dealKey = null, anima
   }, [rack]);
   const [focusSlot, setFocusSlot] = useState(() => rack[0]?.slot ?? 0);
   const [ghost, setGhost] = useState<{ id: string; width: number } | null>(null);
-  const [overSlot, setOverSlot] = useState<number | null>(null);
+  const [spot, setSpot] = useState<{ slot: number; after: boolean } | null>(null);
+  const [settling, setSettling] = useState(false);
+  const rackEl = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!settling) return;
+    const t = requestAnimationFrame(() => requestAnimationFrame(() => setSettling(false)));
+    return () => cancelAnimationFrame(t);
+  }, [settling]);
+  /** While dragging over the rack: where every tile would sit if dropped now. */
+  const preview = useMemo(() => {
+    if (!ghost || !spot) return null;
+    return new Map(insertInLayout(rack, ghost.id, spot.slot, spot.after).map((e) => [e.id, e.slot]));
+  }, [ghost, spot, rack]);
   const [dropped, setDropped] = useState<string | null>(null);
   const ghostEl = useRef<HTMLDivElement | null>(null);
   const [announce, setAnnounce] = useState('');
@@ -150,9 +194,22 @@ export function Rack({ rack, selected, onSelect, onLayout, dealKey = null, anima
   };
   const markZone = (hot: HTMLElement | null) =>
     document.querySelectorAll<HTMLElement>('[data-drop]').forEach((el) => el.classList.toggle('is-drop-hot', el === hot));
-  const slotUnder = (x: number, y: number): number | null => {
-    const el = document.elementFromPoint(x, y)?.closest<HTMLElement>('.rack [data-slot]');
-    return el ? Number(el.dataset.slot) : null;
+  /**
+   * The slot under (x, y) from the rack's fixed grid (not from whichever tile is there: tiles slide
+   * aside while you drag, which would make the target flicker), and whether x is on its right half.
+   */
+  const spotAt = (x: number, y: number): { slot: number; after: boolean } | null => {
+    const tiers = rackEl.current?.querySelectorAll<HTMLElement>('.rack-tier');
+    if (!tiers) return null;
+    for (let row = 0; row < tiers.length; row++) {
+      const r = tiers[row]!.getBoundingClientRect();
+      if (y < r.top - 6 || y > r.bottom + 6 || x < r.left - 6 || x > r.right + 6) continue;
+      const w = r.width / SLOTS_PER_ROW;
+      const f = Math.max(0, Math.min(SLOTS_PER_ROW - 0.001, (x - r.left) / w));
+      const col = Math.floor(f);
+      return { slot: row * SLOTS_PER_ROW + col, after: f - col > 0.5 };
+    }
+    return null;
   };
 
   const onPointerDown = (e: PointerEvent<HTMLButtonElement>, id: string) => {
@@ -186,9 +243,10 @@ export function Rack({ rack, selected, onSelect, onLayout, dealKey = null, anima
       onSelect(null);
       document.body.classList.add('is-dragging-tile');
     }
-    markZone(zoneAt(e.clientX, e.clientY));
-    const over = slotUnder(e.clientX, e.clientY);
-    setOverSlot((cur) => (cur === over ? cur : over));
+    const zone = zoneAt(e.clientX, e.clientY);
+    markZone(zone);
+    const spot = zone ? null : spotAt(e.clientX, e.clientY);
+    setSpot((cur) => (cur?.slot === spot?.slot && cur?.after === spot?.after ? cur : spot));
   };
   // While dragging, redraw the floating tile every frame at the latest pointer position.
   useLayoutEffect(() => {
@@ -208,7 +266,7 @@ export function Rack({ rack, selected, onSelect, onLayout, dealKey = null, anima
     document.body.classList.remove('is-dragging-tile');
     drag.current = null;
     setGhost(null);
-    setOverSlot(null);
+    setSpot(null);
   };
   const onPointerUp = (e: PointerEvent<HTMLButtonElement>) => {
     const d = drag.current;
@@ -221,10 +279,17 @@ export function Rack({ rack, selected, onSelect, onLayout, dealKey = null, anima
       const kind = zone.dataset.drop === 'close' ? 'close' : 'discard';
       return onDrop(kind, d.id, g ?? new DOMRect(e.clientX - d.offX, e.clientY - d.offY, d.width, d.width * 1.4));
     }
-    const to = slotUnder(e.clientX, e.clientY);
-    if (to !== null) {
-      move(d.id, to);
-      setFocusSlot(to);
+    const spot = spotAt(e.clientX, e.clientY);
+    if (spot) {
+      const next = insertInLayout(rack, d.id, spot.slot, spot.after);
+      if (next !== rack) {
+        // The preview already shows this layout: land without sliding again.
+        setSettling(true);
+        onLayout(next);
+        const at = next.find((x) => x.id === d.id)!.slot;
+        setAnnounce(`${tileLabel(d.id)} u zhvendos: ${posName(at)}.`);
+        setFocusSlot(at);
+      }
       setDropped(d.id);
     }
   };
@@ -284,7 +349,7 @@ export function Rack({ rack, selected, onSelect, onLayout, dealKey = null, anima
           key={slot}
           type="button"
           {...common}
-          className={`rack-slot rack-slot-empty ${overSlot === slot ? 'is-drop-target' : ''}`}
+          className={`rack-slot rack-slot-empty ${ghost && preview?.get(ghost.id) === slot ? 'is-drop-target' : ''}`}
           aria-label={`Vend bosh, ${posName(slot)}${selected ? '. Shtyp për ta vendosur gurin e zgjedhur këtu' : ''}`}
           onClick={() => selected && move(selected, slot)}
         />
@@ -295,8 +360,8 @@ export function Rack({ rack, selected, onSelect, onLayout, dealKey = null, anima
         key={slot}
         type="button"
         {...common}
-        className={`rack-slot rack-slot-tile ${isSel ? 'is-selected' : ''} ${ghost?.id === id ? 'is-dragging' : ''} ${fresh === id ? 'is-fresh' : ''} ${overSlot === slot && ghost?.id !== id ? 'is-drop-target' : ''} ${dropped === id ? 'is-dropped' : ''} ${hiddenTile === id ? 'is-leaving' : ''}`}
-        style={{ '--d': dealOrder.get(id) ?? 0 } as CSSProperties}
+        className={`rack-slot rack-slot-tile ${isSel ? 'is-selected' : ''} ${ghost?.id === id ? 'is-dragging' : ''} ${fresh === id ? 'is-fresh' : ''} ${dropped === id ? 'is-dropped' : ''} ${hiddenTile === id ? 'is-leaving' : ''}`}
+        style={{ '--d': dealOrder.get(id) ?? 0, '--shift': id !== ghost?.id ? (preview?.get(id) ?? slot) - slot : 0 } as CSSProperties}
         aria-pressed={isSel}
         aria-label={`${tileLabel(id)}, ${posName(slot)}${isSel ? ', i zgjedhur' : ''}`}
         data-tile={id}
@@ -320,7 +385,7 @@ export function Rack({ rack, selected, onSelect, onLayout, dealKey = null, anima
         Shigjetat lëvizin fokusin nëpër raft. Enter ose hapësira zgjedh një gur ose e vendos gurin e zgjedhur në një vend bosh.
         Shift bashkë me një shigjetë e zhvendos gurin. Renditja nuk hedh asnjë gur.
       </p>
-      <div className={`rack ${dealing ? 'is-dealing' : ''} ${closeMode ? 'is-closing' : ''} ${instantFresh ? 'fresh-instant' : ''}`} role="group" aria-label="Rafti yt" aria-describedby="rack-help" onKeyDown={onKeyDown}>
+      <div ref={rackEl} className={`rack ${settling ? 'is-settling' : ''} ${dealing ? 'is-dealing' : ''} ${closeMode ? 'is-closing' : ''} ${instantFresh ? 'fresh-instant' : ''}`} role="group" aria-label="Rafti yt" aria-describedby="rack-help" onKeyDown={onKeyDown}>
         {[0, 1].map((row) => (
           <div className="rack-tier" key={row}>
             {Array.from({ length: SLOTS_PER_ROW }, (_, i) => renderSlot(row * SLOTS_PER_ROW + i))}
