@@ -203,6 +203,18 @@ class ZholClient {
     return this.enqueue(() => this.emit('player_ready', { requestId: requestId(), ready }));
   }
 
+  addBot(seat?: number) {
+    return this.enqueue(() => this.emit('add_bot', { requestId: requestId(), ...(seat === undefined ? {} : { seat }) }));
+  }
+
+  removeBot(seat: number) {
+    return this.enqueue(() => this.emit('remove_bot', { requestId: requestId(), seat }));
+  }
+
+  startGame() {
+    return this.enqueue(() => this.emit('start_game', { requestId: requestId() }));
+  }
+
   draw(source: DrawSource) {
     const args = this.turn();
     return this.enqueue(() => this.emit('draw_tile', { requestId: requestId(), ...args, source }));

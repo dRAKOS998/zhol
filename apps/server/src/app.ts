@@ -11,6 +11,7 @@ import {
   type RoomJoined,
   type ServerToClientEvents,
   MAX_PAYLOAD_BYTES,
+  addBotPayload,
   createRoomPayload,
   declareWinPayload,
   describeZodError,
@@ -19,13 +20,15 @@ import {
   invitePathFor,
   joinRoomPayload,
   playerReadyPayload,
+  removeBotPayload,
   sortRackPayload,
+  startGamePayload,
   z,
 } from '@zhol/protocol';
 import type { ServerConfig } from './config.js';
 import { type Db, openDatabase } from './db.js';
-import { RoomManager, protocolError } from './rooms.js';
-import { RateLimiter, TtlCache, secureRng } from './security.js';
+import { RoomManager, hostOf, protocolError } from './rooms.js';
+import { RateLimiter, TtlCache, generateSessionToken, secureRng } from './security.js';
 
 interface SocketData {
   code?: string;
@@ -40,7 +43,11 @@ export interface ZholServerOptions {
   config: ServerConfig;
   /** Override the secure RNG (tests only). */
   rng?: Rng;
+  /** How long bots "think" before each move, in ms [min, max]. Tests use small values. */
+  botDelayMs?: { ready: [number, number]; draw: [number, number]; discard: [number, number] };
 }
+
+const DEFAULT_BOT_DELAY = { ready: [700, 1200], draw: [650, 1100], discard: [900, 1700] } as const;
 
 export interface ZholServer {
   httpServer: http.Server;
@@ -58,11 +65,12 @@ function log(config: ServerConfig, event: string, fields: Record<string, unknown
   if (config.logRequests) console.log(JSON.stringify({ t: new Date().toISOString(), event, ...fields }));
 }
 
-export function createZholServer({ config, rng = secureRng }: ZholServerOptions): ZholServer {
+export function createZholServer({ config, rng = secureRng, botDelayMs = DEFAULT_BOT_DELAY as ZholServerOptions['botDelayMs'] }: ZholServerOptions): ZholServer {
   const db = openDatabase(config.databasePath);
   const rooms = new RoomManager(db, rng, { zholPenalty: config.zholPenalty });
   const restored = rooms.restoreActiveRooms();
   log(config, 'rooms_restored', { count: restored });
+  const restoredCodes = db.activeRoomCodes();
 
   const allowed = new Set(config.allowedOrigins);
   const isAllowedOrigin = (origin: string | undefined) => !!origin && allowed.has(origin.replace(/\/$/, ''));
@@ -140,6 +148,34 @@ export function createZholServer({ config, rng = secureRng }: ZholServerOptions)
 
   const roomChannel = (code: string) => `room:${code}`;
 
+  // ---- bots: one pending move per room; the move is decided when the timer fires ----------
+  const botTimers = new Map<string, NodeJS.Timeout>();
+  let closing = false;
+  function scheduleBots(code: string) {
+    if (closing || botTimers.has(code)) return;
+    const job = rooms.nextBotJob(code);
+    if (!job) return;
+    const [min, max] = botDelayMs![job.kind];
+    const delay = min + Math.floor(Math.random() * (max - min + 1));
+    const timer = setTimeout(() => {
+      botTimers.delete(code);
+      try {
+        const now = rooms.nextBotJob(code);
+        if (!now) return;
+        const outcome = rooms.mutate(code, now.seat, `bot_${generateSessionToken().slice(0, 24)}`, now.action);
+        if (outcome.ok) broadcast(code, outcome.events);
+        else {
+          log(config, 'bot_move_rejected', { code, seat: now.seat, error: outcome.error.code });
+          scheduleBots(code);
+        }
+      } catch (e) {
+        log(config, 'bot_error', { code, message: (e as Error).message });
+      }
+    }, delay);
+    timer.unref?.();
+    botTimers.set(code, timer);
+  }
+
   function broadcast(code: string, events: GameEvent[] = []) {
     const room = rooms.get(code);
     if (!room) return;
@@ -153,6 +189,7 @@ export function createZholServer({ config, rng = secureRng }: ZholServerOptions)
         io.to(roomChannel(code)).emit('tournament_result', { results: room.game.results, totals: e.totals, winners: e.winners });
       }
     }
+    scheduleBots(code);
   }
 
   function sendSnapshot(socket: ZholSocket) {
@@ -315,6 +352,33 @@ export function createZholServer({ config, rng = secureRng }: ZholServerOptions)
       });
 
     socket.on('player_ready', gameplay(playerReadyPayload, (d) => ({ type: 'ready', ready: d.ready })));
+
+    /** Host-only lobby commands. */
+    const hostCommand = <T extends z.ZodTypeAny>(schema: T, run: (code: string, seat: number, d: z.output<T>) => { ok: true } | { ok: false; error: ProtocolError }) =>
+      guard((raw, ack) => {
+        const p = parse(schema, raw);
+        if (!p.ok) return safeAck(ack, p);
+        const { code, seat } = socket.data;
+        if (code === undefined || seat === undefined) return safeAck(ack, fail('NOT_IN_ROOM', 'Join a room first'));
+        if (rooms.controllerOf(code, seat) !== socket.id) return safeAck(ack, fail('SESSION_REPLACED', 'This seat is controlled by another connection'));
+        const room = rooms.get(code);
+        if (!room) return safeAck(ack, fail('ROOM_NOT_FOUND', 'Room not found'));
+        if (hostOf(room) !== seat) return safeAck(ack, fail('NOT_HOST', 'Only the host can do that'));
+        const out = run(code, seat, p.data);
+        if (!out.ok) return safeAck(ack, out);
+        safeAck(ack, { ok: true, data: {} });
+        broadcast(code, 'events' in out ? (out as { events: GameEvent[] }).events : []);
+      });
+
+    socket.on('add_bot', hostCommand(addBotPayload, (code, seat, d) => rooms.addBot(code, seat, d.seat)));
+    socket.on('remove_bot', hostCommand(removeBotPayload, (code, seat, d) => rooms.removeBot(code, seat, d.seat)));
+    socket.on(
+      'start_game',
+      hostCommand(startGamePayload, (code, seat, d) => {
+        const out = rooms.mutate(code, seat, d.requestId, { type: 'start' });
+        return out.ok ? { ok: true, events: out.events } : out;
+      }),
+    );
     socket.on('draw_tile', gameplay(drawTilePayload, (d) => ({ type: 'draw', source: d.source, dealId: d.dealId, turnId: d.turnId })));
     socket.on('discard_tile', gameplay(discardTilePayload, (d) => ({ type: 'discard', tileId: d.tileId, dealId: d.dealId, turnId: d.turnId })));
     socket.on('declare_win', gameplay(declareWinPayload, (d) => ({ type: 'declare_win', tileId: d.tileId, dealId: d.dealId, turnId: d.turnId })));
@@ -322,6 +386,9 @@ export function createZholServer({ config, rng = secureRng }: ZholServerOptions)
 
     socket.on('disconnect', () => unbind(socket, true));
   });
+
+  // Bots in rooms restored after a restart pick up where they left off.
+  for (const code of restoredCodes) scheduleBots(code);
 
   const pruneTimer = setInterval(() => {
     try {
@@ -347,7 +414,10 @@ export function createZholServer({ config, rng = secureRng }: ZholServerOptions)
       });
     },
     async close() {
+      closing = true;
       clearInterval(pruneTimer);
+      for (const t of botTimers.values()) clearTimeout(t);
+      botTimers.clear();
       await new Promise<void>((resolve) => io.close(() => resolve()));
       if (httpServer.listening) await new Promise<void>((resolve) => httpServer.close(() => resolve()));
       db.close();

@@ -64,7 +64,7 @@ test('four isolated players play a round in real time', async ({ browser }) => {
     await p.goto(link);
     await p.getByLabel('Emri yt').fill(names[i + 1]!);
     await p.getByRole('button', { name: 'Hyr në dhomë' }).click();
-    await expect(p.getByText('Fto tre shokë')).toBeVisible();
+    await expect(p.getByText('Fto shokët')).toBeVisible();
   }
   await expect(a.getByText('Lojtarët (4/4)')).toBeVisible();
 
@@ -79,7 +79,9 @@ test('four isolated players play a round in real time', async ({ browser }) => {
   await d.screenshot({ path: 'test-results/lobby-360.png', fullPage: true });
 
   // Everyone readies up
-  for (const p of [a, b, c, d]) await p.getByRole('button', { name: 'Jam gati' }).click();
+  for (const p of [b, c, d]) await p.getByRole('button', { name: 'Jam gati' }).click();
+  // The host (seat 1) starts once the others are ready.
+  await a.getByRole('button', { name: /^Fillo lojën/ }).click();
   for (const p of [a, b, c, d]) await expect(p.getByRole('button', { name: 'Tabela e pikëve' })).toBeVisible();
 
   // 360 px portrait: no horizontal scroll; rack and actions reachable

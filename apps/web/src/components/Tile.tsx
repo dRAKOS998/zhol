@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { memo, type CSSProperties } from 'react';
 import { type TileId, parseTile } from '@zhol/engine';
 import { tileLabel } from '../lib/i18n';
 
@@ -50,7 +50,11 @@ export const TileFace = memo(function TileFace({ id, size = 'rack', className = 
   );
 });
 
-/** Face-down tile (the stock). */
-export function TileBack({ className = '' }: { className?: string }) {
-  return <span className={`tile tile-table tile-back ${className}`} aria-hidden="true" />;
+/** Face-down tile (the stock, opponents' racks). */
+export function TileBack({ className = '', size = 'table', style }: { className?: string; size?: 'table' | 'mini'; style?: CSSProperties }) {
+  return (
+    <span className={`tile tile-${size} tile-back ${className}`} style={style} aria-hidden="true">
+      <span className="tile-back-mark" />
+    </span>
+  );
 }

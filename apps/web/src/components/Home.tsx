@@ -39,11 +39,12 @@ export function Home() {
     <main className="home">
       <div className="home-hero" aria-hidden="true">
         <TileFace id="u07a" size="table" className="hero-tile hero-t1" />
-        <TileFace id="z1" size="table" className="hero-tile hero-t2" />
-        <TileFace id="r07b" size="table" className="hero-tile hero-t3" />
+        <TileFace id="k07b" size="table" className="hero-tile hero-t2" />
+        <TileFace id="z1" size="table" className="hero-tile hero-t3" />
+        <TileFace id="r07b" size="table" className="hero-tile hero-t4" />
       </div>
-      <h1 className="wordmark">Zhol</h1>
-      <p className="home-lede">Katër shokë, një lidhje, katër raunde. Mblidh vargje e grupe dhe mbyll i pari.</p>
+      <h1 className="wordmark wordmark-hero">Zhol</h1>
+      <p className="home-lede">2 deri në 4 shokë, një lidhje, ose luaj kundër botëve. Mblidh vargje e grupe dhe mbyll i pari.</p>
 
       <form className="panel" onSubmit={create} aria-labelledby="create-h">
         <h2 id="create-h" className="panel-title">Dhomë e re</h2>

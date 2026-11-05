@@ -7,6 +7,8 @@ export interface StoredRoom {
   code: string;
   version: number;
   names: (string | null)[];
+  /** Seats played by the computer. */
+  bots: boolean[];
   game: GameState;
   createdAt: number;
   updatedAt: number;
@@ -65,17 +67,22 @@ export function openDatabase(file: string) {
   db.pragma('foreign_keys = ON');
   db.pragma('busy_timeout = 5000');
   db.exec(SCHEMA);
+  // Migration: bot seats (added with 2–4 player tables).
+  const cols = db.prepare<[], { name: string }>('PRAGMA table_info(rooms)').all();
+  if (!cols.some((c) => c.name === 'bots_json')) {
+    db.exec("ALTER TABLE rooms ADD COLUMN bots_json TEXT NOT NULL DEFAULT '[false,false,false,false]'");
+  }
 
   const q = {
-    getRoom: db.prepare<[string], { code: string; version: number; names_json: string; state_json: string; created_at: number; updated_at: number }>(
-      'SELECT code, version, names_json, state_json, created_at, updated_at FROM rooms WHERE code = ?',
+    getRoom: db.prepare<[string], { code: string; version: number; names_json: string; bots_json: string; state_json: string; created_at: number; updated_at: number }>(
+      'SELECT code, version, names_json, bots_json, state_json, created_at, updated_at FROM rooms WHERE code = ?',
     ),
     roomExists: db.prepare<[string], { n: number }>('SELECT COUNT(*) AS n FROM rooms WHERE code = ?'),
     insertRoom: db.prepare(
-      'INSERT INTO rooms (code, version, names_json, state_json, phase, created_at, updated_at) VALUES (@code, @version, @names, @state, @phase, @now, @now)',
+      'INSERT INTO rooms (code, version, names_json, bots_json, state_json, phase, created_at, updated_at) VALUES (@code, @version, @names, @bots, @state, @phase, @now, @now)',
     ),
     updateRoom: db.prepare(
-      'UPDATE rooms SET version = @version, names_json = @names, state_json = @state, phase = @phase, updated_at = @now WHERE code = @code AND version = @expected',
+      'UPDATE rooms SET version = @version, names_json = @names, bots_json = @bots, state_json = @state, phase = @phase, updated_at = @now WHERE code = @code AND version = @expected',
     ),
     insertSeat: db.prepare('INSERT INTO seats (room_code, seat, token_hash, created_at) VALUES (?, ?, ?, ?)'),
     getSeatHashes: db.prepare<[string], { seat: number; token_hash: string }>('SELECT seat, token_hash FROM seats WHERE room_code = ?'),
@@ -100,6 +107,7 @@ export function openDatabase(file: string) {
         code: row.code,
         version: row.version,
         names: JSON.parse(row.names_json),
+        bots: JSON.parse(row.bots_json),
         game: JSON.parse(row.state_json),
         createdAt: row.created_at,
         updatedAt: row.updated_at,
@@ -111,6 +119,7 @@ export function openDatabase(file: string) {
         code: room.code,
         version: room.version,
         names: JSON.stringify(room.names),
+        bots: JSON.stringify(room.bots),
         state: JSON.stringify(room.game),
         phase: room.game.phase,
         now: room.updatedAt,
@@ -122,6 +131,7 @@ export function openDatabase(file: string) {
         code: room.code,
         version: room.version,
         names: JSON.stringify(room.names),
+        bots: JSON.stringify(room.bots),
         state: JSON.stringify(room.game),
         phase: room.game.phase,
         now: room.updatedAt,

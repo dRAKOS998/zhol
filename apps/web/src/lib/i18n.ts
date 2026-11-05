@@ -41,6 +41,9 @@ const ERRORS: Record<string, string> = {
   NOT_SEATED: 'Nuk je i ulur në këtë dhomë.',
   SEAT_TAKEN: 'Ky vend është zënë.',
   INVALID_SEAT: 'Vend i pavlefshëm.',
+  NOT_HOST: 'Këtë e bën vetëm ai që krijoi dhomën.',
+  NOT_ENOUGH_PLAYERS: 'Duhen të paktën dy lojtarë. Fto një shok ose shto një bot.',
+  NOT_ALL_READY: 'Prit që të gjithë lojtarët të shtypin «Jam gati».',
 };
 
 export function errorText(err: Pick<ProtocolError, 'code' | 'details'> | null | undefined): string {

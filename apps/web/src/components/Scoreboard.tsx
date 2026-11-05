@@ -10,7 +10,9 @@ export function winnersText(s: PublicState): string | null {
   return `Fitues të përbashkët: ${names.join(', ')} (${formatScore(s.totals[s.winners[0]!]!)})`;
 }
 
-/** Full score table: four players × four rounds + totals. */
+const inGame = (state: PublicState) => state.seats.filter((x) => (state.players.length ? state.players.includes(x.seat) : x.name));
+
+/** Full score table: players × rounds + totals. */
 export function ScoreTable({ state, mySeat }: { state: PublicState; mySeat: number | null }) {
   const rounds = Array.from({ length: state.totalRounds }, (_, i) => i + 1);
   const last = state.results.at(-1);
@@ -41,12 +43,13 @@ export function ScoreTable({ state, mySeat }: { state: PublicState; mySeat: numb
             </tr>
           </thead>
           <tbody>
-            {state.seats.map((seat) => {
+            {inGame(state).map((seat) => {
               const isWinner = state.winners?.includes(seat.seat);
               return (
                 <tr key={seat.seat} className={seat.seat === mySeat ? 'is-me' : ''}>
                   <th scope="row">
                     <span className="score-name">{seat.name ?? `Vendi ${seat.seat + 1}`}</span>
+                    {seat.bot && <span className="score-you"> · bot</span>}
                     {seat.seat === mySeat && <span className="score-you"> (ti)</span>}
                     {isWinner && (
                       <span className="badge badge-gold" title="Fitues">
@@ -95,7 +98,7 @@ export function ScoreTable({ state, mySeat }: { state: PublicState; mySeat: numb
 export function ScoreSummary({ state, mySeat }: { state: PublicState; mySeat: number | null }) {
   return (
     <ul className="summary" aria-label="Pikët totale">
-      {state.seats.map((s) => (
+      {inGame(state).map((s) => (
         <li key={s.seat} className={s.seat === mySeat ? 'is-me' : ''}>
           <span className="summary-name">{s.name}</span>
           <span className="summary-score">{formatScore(state.totals[s.seat]!)}</span>

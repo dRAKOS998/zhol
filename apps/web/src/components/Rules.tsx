@@ -45,7 +45,7 @@ export function Rules() {
           Të tjerët marrin pikët e gurëve që u mbeten pa lidhje, me renditjen më të mirë të mundshme: numri i shkruar mbi
           gur, 20 për një Zhol pa lidhje. P.sh. 5 e kuqe dhe 12 e zezë pa lidhje japin +17.
         </li>
-        <li>Pas katër raundeve fiton kush ka më pak pikë. Nëse disa kanë të njëjtin rezultat më të ulët, fitojnë bashkë.</li>
+        <li>Luhen aq raunde sa ka lojtarë (2–4), që secili të fillojë një herë. Në fund fiton kush ka më pak pikë. Nëse disa kanë të njëjtin rezultat më të ulët, fitojnë bashkë.</li>
       </ul>
       <h3>Dorë e bllokuar</h3>
       <p>

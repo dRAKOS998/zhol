@@ -1,13 +1,13 @@
 # Zhol
 
-A real-time, four-player tile game for friends. One player creates a room, shares a single link, and four people play a four-round tournament from phones or computers. The interface and in-game rules are in Albanian; code and developer docs are in English.
+A real-time tile game for 2–4 friends, with computer opponents to fill empty seats. One player creates a room, shares a single link (or adds bots), and the table plays one round per player so everyone starts once. The interface and in-game rules are in Albanian; code and developer docs are in English.
 
 The server is authoritative: clients send intents, the server validates them against a pure rules engine, commits to SQLite, and sends each player only the view they are allowed to see.
 
 ```
 apps/web          React 19 + Vite + Tailwind CSS 4 — home, invite route, lobby, table, rack, scoreboard, socket client
 apps/server       Express 5 + Socket.IO 4 — handlers, room sessions, SQLite persistence (better-sqlite3), /health
-packages/engine   Pure TypeScript — tiles, dealing, legal moves, hand solver, scoring, turn state machine
+packages/engine   Pure TypeScript — tiles, dealing, legal moves, hand solver, scoring, turn state machine, bot player
 packages/protocol Shared event contracts, zod runtime validation, error codes, public/private view types
 ```
 
@@ -44,7 +44,7 @@ npm run dev
 1. Open http://localhost:5173, type your name, press **Krijo dhomë**.
 2. In the lobby press **Kopjo lidhjen** and send the link (`http://<host>:5173/room/XXXXXXXX`) to three friends.
 3. Each friend opens the link, types a name, presses **Hyr në dhomë**.
-4. Everyone presses **Jam gati**. The game deals as soon as all four seats are ready.
+4. Everyone presses **Jam gati**. A full table of four deals by itself; with 2–3 players the host presses **Fillo lojën**. The host can also tap an empty seat to **Shto bot** (or **Mbush vendet me bot**) to play against the computer.
 5. The starter (chosen randomly) holds 15 tiles and only discards: tap a tile, then **Hidh**. The next player presses **Tërhiq një gur** (or takes the previous player's discard), then discards.
 6. To close, tap the tile you want to throw last, press **Mbyll raundin**, then confirm.
 
@@ -171,4 +171,4 @@ Back up `/var/lib/zhol/zhol.db*` (WAL mode: copy with `sqlite3 zhol.db ".backup 
 
 **Dorë e bllokuar.** Kush tërheq gurin e fundit të stokut mund të mbyllë. Nëse vetëm hedh, dora bllokohet dhe gurët ndahen sërish për të njëjtin raund, me të njëjtin fillues; pikët nuk ndryshojnë.
 
-**Fituesi.** Pas katër raundeve fiton kush ka më pak pikë. Nëse disa ndajnë rezultatin më të ulët, fitojnë bashkë.
+**Fituesi.** Luhen aq raunde sa ka lojtarë (2–4). Në fund fiton kush ka më pak pikë. Nëse disa ndajnë rezultatin më të ulët, fitojnë bashkë.

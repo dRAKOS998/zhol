@@ -2,13 +2,19 @@ import { type Rng, shuffleInPlace } from './rng.js';
 import { type HandEvaluation, type SolverConfig, DEFAULT_SOLVER_CONFIG, checkClose, evaluateHand } from './solver.js';
 import { type TileId, TOTAL_TILES, compareTileIds, createTileSet, isZhol } from './tiles.js';
 
+/** Seats around the table. A tournament is played by 2–4 of them. */
 export const SEAT_COUNT = 4;
+export const MAX_PLAYERS = 4;
+export const MIN_PLAYERS = 2;
+/** Upper bound on rounds: one per player, so each player starts once. */
 export const ROUND_COUNT = 4;
 export const SLOTS_PER_ROW = 12;
 export const RACK_SLOTS = SLOTS_PER_ROW * 2;
 export const STARTER_TILES = 15;
 export const OTHER_TILES = 14;
-export const OPENING_STOCK = TOTAL_TILES - STARTER_TILES - OTHER_TILES * 3 - 1; // 48
+/** Stock after the opening deal for a given number of players (4 → 48, 3 → 62, 2 → 76). */
+export const openingStockFor = (players: number) => TOTAL_TILES - STARTER_TILES - OTHER_TILES * (players - 1) - 1;
+export const OPENING_STOCK = openingStockFor(4); // 48
 
 export const WIN_SCORE = -20;
 export const ZHOL_WIN_SCORE = -40;
@@ -68,6 +74,11 @@ export interface GameState {
   phase: Phase;
   seated: boolean[];
   ready: boolean[];
+  /**
+   * Seats taking part in the tournament, ascending, fixed when the first deal starts.
+   * Absent in states saved before 2–3 player support (those always had all four seats).
+   */
+  players?: number[];
   firstStarter: number | null;
   /** Round being played (or just scored). 0 before the first deal. */
   roundNumber: number;
@@ -93,10 +104,14 @@ export type EngineErrorCode =
   | 'TOURNAMENT_COMPLETE'
   | 'NOT_SEATED'
   | 'SEAT_TAKEN'
-  | 'INVALID_SEAT';
+  | 'INVALID_SEAT'
+  | 'NOT_ENOUGH_PLAYERS'
+  | 'NOT_ALL_READY';
 
 export type GameAction =
   | { type: 'ready'; ready: boolean }
+  /** Lobby only: deal now with everyone seated (2–4), provided they are all ready. */
+  | { type: 'start' }
   | { type: 'draw'; source: DrawSource; dealId: string; turnId: number }
   | { type: 'discard'; tileId: TileId; dealId: string; turnId: number }
   | { type: 'declare_win'; tileId: TileId; dealId: string; turnId: number }
@@ -133,8 +148,25 @@ const cloneState = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
 const fail = (code: EngineErrorCode, details?: Record<string, unknown>): EngineError => ({ ok: false, code, details });
 
-export const nextSeat = (seat: number) => (seat + 1) % SEAT_COUNT;
-export const previousSeat = (seat: number) => (seat + SEAT_COUNT - 1) % SEAT_COUNT;
+const ALL_SEATS = [0, 1, 2, 3];
+
+/** Seats in the tournament (all four for legacy states and before the first deal). */
+export function playersOf(state: Pick<GameState, 'players'>): number[] {
+  return state.players ?? ALL_SEATS;
+}
+
+/** Rounds in this tournament: one per player, so everyone starts once. */
+export function roundCountOf(state: Pick<GameState, 'players' | 'seated' | 'phase'>): number {
+  if (state.players) return state.players.length;
+  if (state.phase === 'LOBBY') return Math.max(MIN_PLAYERS, state.seated.filter(Boolean).length);
+  return ROUND_COUNT;
+}
+
+/** Next seat clockwise among `players`. */
+export const nextSeat = (seat: number, players: readonly number[] = ALL_SEATS) => players[(players.indexOf(seat) + 1) % players.length]!;
+/** Previous seat (the one whose discard you may take) among `players`. */
+export const previousSeat = (seat: number, players: readonly number[] = ALL_SEATS) =>
+  players[(players.indexOf(seat) + players.length - 1) % players.length]!;
 
 export function createGame(config: Partial<GameConfig> = {}): GameState {
   return {
@@ -157,25 +189,26 @@ export function totalsOf(state: Pick<GameState, 'results'>): number[] {
   return state.results.at(-1)?.totals.slice() ?? [0, 0, 0, 0];
 }
 
-/** Seats sharing the lowest cumulative total. */
-export function tournamentWinners(totals: readonly number[]): number[] {
-  const min = Math.min(...totals);
-  return totals.flatMap((t, i) => (t === min ? [i] : []));
+/** Seats (among `players`) sharing the lowest cumulative total. */
+export function tournamentWinners(totals: readonly number[], players: readonly number[] = ALL_SEATS): number[] {
+  const min = Math.min(...players.map((p) => totals[p]!));
+  return players.filter((p) => totals[p] === min);
 }
 
-export function starterForRound(firstStarter: number, roundNumber: number): number {
-  return (firstStarter + roundNumber - 1) % SEAT_COUNT;
+export function starterForRound(firstStarter: number, roundNumber: number, players: readonly number[] = ALL_SEATS): number {
+  const i = players.indexOf(firstStarter);
+  return players[(i + roundNumber - 1) % players.length]!;
 }
 
-/** Shuffle with Fisher–Yates, pick a uniform numbered indicator, deal 15/14/14/14, rest to stock. */
-export function createRandomDealPlan(rng: Rng): DealPlan {
+/** Shuffle with Fisher–Yates, pick a uniform numbered indicator, deal 15/14/…, rest to stock. */
+export function createRandomDealPlan(rng: Rng, playerCount = SEAT_COUNT): DealPlan {
   const tiles = shuffleInPlace(createTileSet(), rng);
   const numbered = tiles.filter((id) => !isZhol(id));
   const indicator = numbered[rng.int(numbered.length)]!;
   const rest = tiles.filter((id) => id !== indicator);
   const racks: TileId[][] = [];
   let cursor = 0;
-  for (let i = 0; i < SEAT_COUNT; i++) {
+  for (let i = 0; i < playerCount; i++) {
     const n = i === 0 ? STARTER_TILES : OTHER_TILES;
     racks.push(rest.slice(cursor, cursor + n));
     cursor += n;
@@ -183,12 +216,13 @@ export function createRandomDealPlan(rng: Rng): DealPlan {
   return { indicator, racks, stock: rest.slice(cursor) };
 }
 
-/** Throws if a deal plan violates the opening invariant (57 + 1 + 48 = 106, unique tiles). */
+/** Throws if a deal plan violates the opening invariant (racks + 1 + stock = 106, unique tiles). */
 export function assertValidDealPlan(plan: DealPlan): void {
-  if (plan.racks.length !== SEAT_COUNT) throw new Error('Deal plan needs four racks');
+  const n = plan.racks.length;
+  if (n < MIN_PLAYERS || n > MAX_PLAYERS) throw new Error('Deal plan needs two to four racks');
   if (plan.racks[0]!.length !== STARTER_TILES) throw new Error('Starter must receive 15 tiles');
-  for (let i = 1; i < SEAT_COUNT; i++) if (plan.racks[i]!.length !== OTHER_TILES) throw new Error('Other seats receive 14 tiles');
-  if (plan.stock.length !== OPENING_STOCK) throw new Error('Stock must hold 48 tiles');
+  for (let i = 1; i < n; i++) if (plan.racks[i]!.length !== OTHER_TILES) throw new Error('Other seats receive 14 tiles');
+  if (plan.stock.length !== openingStockFor(n)) throw new Error(`Stock must hold ${openingStockFor(n)} tiles`);
   if (isZhol(plan.indicator)) throw new Error('Indicator must be a numbered tile');
   const all = [...plan.racks.flat(), plan.indicator, ...plan.stock];
   const universe = new Set(createTileSet());
@@ -208,11 +242,16 @@ function initialRack(ids: TileId[]): RackEntry[] {
 }
 
 function startDeal(state: GameState, starter: number, ctx: ApplyContext): GameEvent {
-  const plan = ctx.takeDealPlan?.() ?? createRandomDealPlan(ctx.rng);
+  const players = playersOf(state);
+  const n = players.length;
+  let plan = ctx.takeDealPlan?.();
+  if (plan && plan.racks.length !== n) plan = undefined; // a rigged plan for another table size
+  plan ??= createRandomDealPlan(ctx.rng, n);
   assertValidDealPlan(plan);
   state.dealSeq += 1;
   const racks: RackEntry[][] = [[], [], [], []];
-  for (let i = 0; i < SEAT_COUNT; i++) racks[(starter + i) % SEAT_COUNT] = initialRack(plan.racks[i]!);
+  const starterIdx = players.indexOf(starter);
+  for (let i = 0; i < n; i++) racks[players[(starterIdx + i) % n]!] = initialRack(plan.racks[i]!);
   state.deal = {
     dealId: `d${state.dealSeq}`,
     roundNumber: state.roundNumber,
@@ -246,6 +285,17 @@ export function rackIds(deal: DealState, seat: number): TileId[] {
   return deal.racks[seat]!.map((e) => e.id);
 }
 
+/** Free a lobby seat (a removed bot). */
+export function unseatPlayer(state: GameState, seat: number): ApplyResult {
+  if (!Number.isInteger(seat) || seat < 0 || seat >= SEAT_COUNT) return fail('INVALID_SEAT');
+  if (state.phase !== 'LOBBY') return fail('WRONG_PHASE');
+  if (!state.seated[seat]) return fail('NOT_SEATED');
+  const next = cloneState(state);
+  next.seated[seat] = false;
+  next.ready[seat] = false;
+  return { ok: true, state: next, events: [] };
+}
+
 /** Seat a player in the lobby (the server chooses the seat index). */
 export function seatPlayer(state: GameState, seat: number): ApplyResult {
   if (!Number.isInteger(seat) || seat < 0 || seat >= SEAT_COUNT) return fail('INVALID_SEAT');
@@ -269,19 +319,36 @@ export function applyAction(state: GameState, seat: number, action: GameAction, 
     return { ok: true, state: next, events };
   };
 
+  /** Fix the players and deal round 1. */
+  const beginTournament = () => {
+    next.players = next.seated.flatMap((s, i) => (s ? [i] : []));
+    next.firstStarter = next.players[ctx.rng.int(next.players.length)]!;
+    next.roundNumber = 1;
+    next.blockedDeals = 0;
+    events.push(startDeal(next, starterForRound(next.firstStarter, 1, next.players), ctx));
+  };
+
+  if (action.type === 'start') {
+    if (next.phase !== 'LOBBY') return fail('WRONG_PHASE');
+    next.ready[seat] = true;
+    const seatedSeats = next.seated.flatMap((s, i) => (s ? [i] : []));
+    if (seatedSeats.length < MIN_PLAYERS) return fail('NOT_ENOUGH_PLAYERS', { seated: seatedSeats.length });
+    const waiting = seatedSeats.filter((s) => !next.ready[s]);
+    if (waiting.length) return fail('NOT_ALL_READY', { waiting });
+    beginTournament();
+    return done();
+  }
+
   if (action.type === 'ready') {
     if (next.phase !== 'LOBBY' && next.phase !== 'ROUND_RESULT') return fail('WRONG_PHASE');
     next.ready[seat] = action.ready;
-    const everyone = next.seated.every(Boolean) && next.ready.every(Boolean);
-    if (everyone) {
-      if (next.phase === 'LOBBY') {
-        next.firstStarter = ctx.rng.int(SEAT_COUNT);
-        next.roundNumber = 1;
-      } else {
-        next.roundNumber += 1;
-      }
+    if (next.phase === 'LOBBY') {
+      // A full table starts by itself once everyone is ready; smaller tables wait for the host's start.
+      if (next.seated.every(Boolean) && next.ready.every(Boolean)) beginTournament();
+    } else if (playersOf(next).every((p) => next.ready[p])) {
+      next.roundNumber += 1;
       next.blockedDeals = 0;
-      events.push(startDeal(next, starterForRound(next.firstStarter!, next.roundNumber), ctx));
+      events.push(startDeal(next, starterForRound(next.firstStarter!, next.roundNumber, playersOf(next)), ctx));
     }
     return done();
   }
@@ -318,7 +385,7 @@ export function applyAction(state: GameState, seat: number, action: GameAction, 
         tile = deal.stock.shift();
         if (!tile) return fail('EMPTY_STOCK');
       } else {
-        tile = deal.discards[previousSeat(seat)]!.pop();
+        tile = deal.discards[previousSeat(seat, playersOf(next))]!.pop();
         if (!tile) return fail('EMPTY_DISCARD');
       }
       rack.push({ id: tile, slot: freeSlotFor(rack) });
@@ -344,7 +411,7 @@ export function applyAction(state: GameState, seat: number, action: GameAction, 
         events.push({ type: 'deal_blocked', blockedDealId, dealId: next.deal!.dealId, roundNumber: next.roundNumber });
         return done();
       }
-      deal.active = nextSeat(seat);
+      deal.active = nextSeat(seat, playersOf(next));
       next.phase = 'AWAITING_DRAW';
       return done();
     }
@@ -365,7 +432,7 @@ export function applyAction(state: GameState, seat: number, action: GameAction, 
       const finishType: FinishType = isZhol(action.tileId) ? 'zhol' : 'normal';
       const penalties = [0, 0, 0, 0];
       const deltas = [0, 0, 0, 0];
-      for (let s = 0; s < SEAT_COUNT; s++) {
+      for (const s of playersOf(next)) {
         if (s === seat) {
           deltas[s] = finishType === 'zhol' ? ZHOL_WIN_SCORE : WIN_SCORE;
         } else {
@@ -389,9 +456,9 @@ export function applyAction(state: GameState, seat: number, action: GameAction, 
       next.results.push(result);
       next.ready = [false, false, false, false];
       events.push({ type: 'round_scored', result });
-      if (next.results.length >= ROUND_COUNT) {
+      if (next.results.length >= playersOf(next).length) {
         next.phase = 'TOURNAMENT_COMPLETE';
-        events.push({ type: 'tournament_complete', winners: tournamentWinners(totals), totals });
+        events.push({ type: 'tournament_complete', winners: tournamentWinners(totals, playersOf(next)), totals });
       } else {
         next.phase = 'ROUND_RESULT';
       }

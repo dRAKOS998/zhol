@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from 'react';
 import { RACK_SLOTS, SLOTS_PER_ROW, type RackEntry } from '@zhol/engine';
 import { TileFace } from './Tile';
 import { tileLabel } from '../lib/i18n';
@@ -8,6 +8,12 @@ interface RackProps {
   selected: string | null;
   onSelect: (id: string | null) => void;
   onLayout: (layout: RackEntry[]) => void;
+  /** Changes with every deal; the rack plays its dealing animation when it does. */
+  dealKey?: string | null;
+  /** Play the dealing animation on first mount too (a deal that has just started). */
+  animateDeal?: boolean;
+  /** Closing the round: tiles glow to invite choosing the final discard. */
+  closeMode?: boolean;
 }
 
 interface DragState {
@@ -36,7 +42,7 @@ const posName = (slot: number) => `${rowName(slot)}, vendi ${(slot % SLOTS_PER_R
  * tap an empty slot, and keyboard (arrows move focus, Shift+arrows move the
  * tile, Enter/Space select). Nothing here can discard a tile.
  */
-export function Rack({ rack, selected, onSelect, onLayout }: RackProps) {
+export function Rack({ rack, selected, onSelect, onLayout, dealKey = null, animateDeal = false, closeMode = false }: RackProps) {
   const bySlot = useMemo(() => {
     const m = new Map<number, string>();
     rack.forEach((e) => m.set(e.slot, e.id));
@@ -47,6 +53,22 @@ export function Rack({ rack, selected, onSelect, onLayout }: RackProps) {
   const [announce, setAnnounce] = useState('');
   const drag = useRef<DragState | null>(null);
   const buttons = useRef<(HTMLButtonElement | null)[]>([]);
+
+  // Dealing animation: tiles drop in one after another when a new deal arrives.
+  const [dealing, setDealing] = useState(animateDeal);
+  const lastDeal = useRef(dealKey);
+  useEffect(() => {
+    if (dealKey !== lastDeal.current) {
+      lastDeal.current = dealKey;
+      setDealing(true);
+    }
+  }, [dealKey]);
+  useEffect(() => {
+    if (!dealing) return;
+    const t = setTimeout(() => setDealing(false), 1700);
+    return () => clearTimeout(t);
+  }, [dealing, dealKey]);
+  const dealOrder = useMemo(() => new Map(rack.map((e, i) => [e.id, i])), [rack]);
 
   // Highlight a freshly drawn tile until the rack changes again.
   const prevIds = useRef<Set<string>>(new Set(rack.map((e) => e.id)));
@@ -171,6 +193,7 @@ export function Rack({ rack, selected, onSelect, onLayout }: RackProps) {
         type="button"
         {...common}
         className={`rack-slot rack-slot-tile ${isSel ? 'is-selected' : ''} ${ghost?.id === id ? 'is-dragging' : ''} ${fresh === id ? 'is-fresh' : ''}`}
+        style={{ '--d': dealOrder.get(id) ?? 0 } as CSSProperties}
         aria-pressed={isSel}
         aria-label={`${tileLabel(id)}, ${posName(slot)}${isSel ? ', i zgjedhur' : ''}`}
         data-tile={id}
@@ -194,7 +217,7 @@ export function Rack({ rack, selected, onSelect, onLayout }: RackProps) {
         Shigjetat lëvizin fokusin nëpër raft. Enter ose hapësira zgjedh një gur ose e vendos gurin e zgjedhur në një vend bosh.
         Shift bashkë me një shigjetë e zhvendos gurin. Renditja nuk hedh asnjë gur.
       </p>
-      <div className="rack" role="group" aria-label="Rafti yt" aria-describedby="rack-help" onKeyDown={onKeyDown}>
+      <div className={`rack ${dealing ? 'is-dealing' : ''} ${closeMode ? 'is-closing' : ''}`} role="group" aria-label="Rafti yt" aria-describedby="rack-help" onKeyDown={onKeyDown}>
         {[0, 1].map((row) => (
           <div className="rack-tier" key={row}>
             {Array.from({ length: SLOTS_PER_ROW }, (_, i) => renderSlot(row * SLOTS_PER_ROW + i))}

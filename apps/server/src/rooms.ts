@@ -5,13 +5,19 @@ import {
   type GameEvent,
   type GameState,
   type Rng,
-  ROUND_COUNT,
+  type TileId,
+  MIN_PLAYERS,
   SEAT_COUNT,
   applyAction,
+  chooseBotMove,
   createGame,
+  playersOf,
+  previousSeat,
+  roundCountOf,
   seatPlayer,
   totalsOf,
   tournamentWinners,
+  unseatPlayer,
 } from '@zhol/engine';
 import type { ErrorCode, PlayerView, ProtocolError, PublicState } from '@zhol/protocol';
 import type { Db, StoredRoom } from './db.js';
@@ -31,7 +37,20 @@ const ENGINE_MESSAGES: Partial<Record<ErrorCode, string>> = {
   INVALID_CLOSE: 'The remaining 14 tiles must all form legal links',
   TOURNAMENT_COMPLETE: 'The tournament is complete',
   NOT_SEATED: 'You are not seated in this room',
+  NOT_ENOUGH_PLAYERS: 'At least two players are needed to start',
+  NOT_ALL_READY: 'Every seated player must be ready before the start',
 };
+
+/** Names for computer players, used in order and skipping any a human already took. */
+export const BOT_NAMES = ['Bot Arta', 'Bot Drini', 'Bot Era', 'Bot Leka', 'Bot Teuta', 'Bot Genti'];
+
+/** The room's host: the lowest seat held by a human (the creator, normally seat 0). */
+export function hostOf(room: Pick<StoredRoom, 'names' | 'bots'>): number {
+  const i = room.names.findIndex((n, seat) => n !== null && !room.bots[seat]);
+  return i < 0 ? 0 : i;
+}
+
+export type BotJob = { seat: number; action: GameAction; kind: 'ready' | 'draw' | 'discard' };
 
 export function protocolError(code: ErrorCode, message?: string, details?: Record<string, unknown>): ProtocolError {
   return { code, message: message ?? ENGINE_MESSAGES[code] ?? code, ...(details ? { details } : {}) };
@@ -88,7 +107,8 @@ export class RoomManager {
 
   connected(code: string): boolean[] {
     const list = this.controllers.get(code) ?? [null, null, null, null];
-    return list.map((s) => s !== null);
+    const room = this.cache.get(code);
+    return list.map((s, seat) => s !== null || !!room?.bots[seat]);
   }
 
   // ---- seats ---------------------------------------------------------------
@@ -102,7 +122,7 @@ export class RoomManager {
     const seated = seatPlayer(createGame({ zholPenalty: this.options.zholPenalty }), 0);
     if (!seated.ok) throw new Error(seated.code);
     const now = Date.now();
-    const room: StoredRoom = { code, version: 1, names: [nickname, null, null, null], game: seated.state, createdAt: now, updatedAt: now };
+    const room: StoredRoom = { code, version: 1, names: [nickname, null, null, null], bots: [false, false, false, false], game: seated.state, createdAt: now, updatedAt: now };
     const token = generateSessionToken();
     this.db.transaction(() => {
       this.db.insertRoom(room);
@@ -137,6 +157,91 @@ export class RoomManager {
     });
     this.cache.set(code, next);
     return { ok: true, seat, token };
+  }
+
+  // ---- bots ----------------------------------------------------------------
+
+  private lobbyEdit(code: string, bySeat: number): { ok: true; room: StoredRoom } | { ok: false; error: ProtocolError } {
+    const room = this.get(code);
+    if (!room) return { ok: false, error: protocolError('ROOM_NOT_FOUND', 'Room not found') };
+    if (room.game.phase !== 'LOBBY') return { ok: false, error: protocolError('GAME_IN_PROGRESS', 'Bots can only change before the game starts') };
+    if (hostOf(room) !== bySeat) return { ok: false, error: protocolError('NOT_HOST', 'Only the host can do that') };
+    return { ok: true, room };
+  }
+
+  private save(prev: StoredRoom, next: StoredRoom) {
+    this.db.transaction(() => this.db.updateRoom(next, prev.version));
+    this.cache.set(next.code, next);
+  }
+
+  /** Seat a computer player (ready at once) in `seat`, or the first free seat. */
+  addBot(code: string, bySeat: number, seat?: number): { ok: true; seat: number } | { ok: false; error: ProtocolError } {
+    const e = this.lobbyEdit(code, bySeat);
+    if (!e.ok) return e;
+    const room = e.room;
+    const target = seat ?? room.game.seated.findIndex((s) => !s);
+    if (target < 0) return { ok: false, error: protocolError('ROOM_FULL', 'All four seats are taken') };
+    const seated = seatPlayer(room.game, target);
+    if (!seated.ok) return { ok: false, error: protocolError(seated.code) };
+    const ready = applyAction(seated.state, target, { type: 'ready', ready: true }, { rng: this.rng });
+    if (!ready.ok) return { ok: false, error: protocolError(ready.code) };
+    const taken = new Set(room.names.filter(Boolean).map((n) => n!.toLocaleLowerCase('sq')));
+    const name = BOT_NAMES.find((n) => !taken.has(n.toLocaleLowerCase('sq'))) ?? `Bot ${target + 1}`;
+    const next: StoredRoom = {
+      ...room,
+      version: room.version + 1,
+      names: room.names.map((n, i) => (i === target ? name : n)),
+      bots: room.bots.map((b, i) => (i === target ? true : b)),
+      game: ready.state,
+      updatedAt: Date.now(),
+    };
+    this.save(room, next);
+    return { ok: true, seat: target };
+  }
+
+  removeBot(code: string, bySeat: number, seat: number): { ok: true } | { ok: false; error: ProtocolError } {
+    const e = this.lobbyEdit(code, bySeat);
+    if (!e.ok) return e;
+    const room = e.room;
+    if (!room.bots[seat]) return { ok: false, error: protocolError('INVALID_SEAT', 'That seat is not a bot') };
+    const r = unseatPlayer(room.game, seat);
+    if (!r.ok) return { ok: false, error: protocolError(r.code) };
+    const next: StoredRoom = {
+      ...room,
+      version: room.version + 1,
+      names: room.names.map((n, i) => (i === seat ? null : n)),
+      bots: room.bots.map((b, i) => (i === seat ? false : b)),
+      game: r.state,
+      updatedAt: Date.now(),
+    };
+    this.save(room, next);
+    return { ok: true };
+  }
+
+  /** The next thing a bot in this room should do, decided from the current state; null when no bot is due. */
+  nextBotJob(code: string): BotJob | null {
+    const room = this.get(code);
+    if (!room || !room.bots.some(Boolean)) return null;
+    const g = room.game;
+    if (g.phase === 'LOBBY' || g.phase === 'ROUND_RESULT') {
+      const seats = g.phase === 'LOBBY' ? [0, 1, 2, 3] : playersOf(g);
+      const seat = seats.find((s) => room.bots[s] && g.seated[s] && !g.ready[s]);
+      return seat === undefined ? null : { seat, kind: 'ready', action: { type: 'ready', ready: true } };
+    }
+    const deal = g.deal;
+    if (!deal || (g.phase !== 'AWAITING_DRAW' && g.phase !== 'AWAITING_DISCARD')) return null;
+    const seat = deal.active;
+    if (!room.bots[seat]) return null;
+    const prev = previousSeat(seat, playersOf(g));
+    const move = chooseBotMove({
+      phase: g.phase,
+      rack: deal.racks[seat]!.map((e) => e.id),
+      previousDiscard: (deal.discards[prev]!.at(-1) ?? null) as TileId | null,
+      config: g.config,
+    });
+    const base = { dealId: deal.dealId, turnId: deal.turnId };
+    if (move.type === 'draw') return { seat, kind: 'draw', action: { type: 'draw', source: move.source, ...base } };
+    return { seat, kind: 'discard', action: { type: move.type, tileId: move.tileId, ...base } };
   }
 
   // ---- gameplay ------------------------------------------------------------
@@ -187,15 +292,20 @@ export class RoomManager {
     const connected = this.connected(room.code);
     const inDeal = g.phase === 'AWAITING_DRAW' || g.phase === 'AWAITING_DISCARD';
     const totals = totalsOf(g);
+    const players = g.players ?? (g.phase === 'LOBBY' ? g.seated.flatMap((x, i) => (x ? [i] : [])) : playersOf(g));
     return {
       code: room.code,
       version: room.version,
       phase: g.phase,
       roundNumber: g.roundNumber,
-      totalRounds: ROUND_COUNT,
+      totalRounds: roundCountOf(g),
+      host: hostOf(room),
+      players,
+      minPlayers: MIN_PLAYERS,
       seats: Array.from({ length: SEAT_COUNT }, (_, seat) => ({
         seat,
         name: room.names[seat] ?? null,
+        bot: !!room.bots[seat],
         connected: connected[seat]!,
         ready: g.ready[seat]!,
         rackCount: deal ? deal.racks[seat]!.length : 0,
@@ -211,7 +321,7 @@ export class RoomManager {
       blockedDeals: g.blockedDeals,
       results: g.results,
       totals,
-      winners: g.phase === 'TOURNAMENT_COMPLETE' ? tournamentWinners(totals) : null,
+      winners: g.phase === 'TOURNAMENT_COMPLETE' ? tournamentWinners(totals, playersOf(g)) : null,
       lastEvent: g.lastEvent,
     };
   }

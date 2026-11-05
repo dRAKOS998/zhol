@@ -70,6 +70,14 @@ export const joinRoomPayload = z
 
 export const playerReadyPayload = z.object({ requestId: requestIdSchema, ready: z.boolean() }).strict();
 
+const seatSchema = z.number().int().min(0).max(3);
+/** Host only, lobby only: seat a computer player (in `seat`, or the first free seat). */
+export const addBotPayload = z.object({ requestId: requestIdSchema, seat: seatSchema.optional() }).strict();
+/** Host only, lobby only: free a bot's seat. */
+export const removeBotPayload = z.object({ requestId: requestIdSchema, seat: seatSchema }).strict();
+/** Host only: deal now with everyone seated (2–4 players), once they are all ready. */
+export const startGamePayload = z.object({ requestId: requestIdSchema }).strict();
+
 export const drawTilePayload = z
   .object({
     requestId: requestIdSchema,
@@ -99,6 +107,9 @@ export const sortRackPayload = z
 export type CreateRoomPayload = z.input<typeof createRoomPayload>;
 export type JoinRoomPayload = z.input<typeof joinRoomPayload>;
 export type PlayerReadyPayload = z.input<typeof playerReadyPayload>;
+export type AddBotPayload = z.input<typeof addBotPayload>;
+export type RemoveBotPayload = z.input<typeof removeBotPayload>;
+export type StartGamePayload = z.input<typeof startGamePayload>;
 export type DrawTilePayload = z.input<typeof drawTilePayload>;
 export type DiscardTilePayload = z.input<typeof discardTilePayload>;
 export type DeclareWinPayload = z.input<typeof declareWinPayload>;
@@ -118,6 +129,7 @@ export type ServerErrorCode =
   | 'INVALID_SESSION'
   | 'NOT_IN_ROOM'
   | 'SESSION_REPLACED'
+  | 'NOT_HOST'
   | 'INTERNAL_ERROR';
 
 export type ErrorCode = EngineErrorCode | ServerErrorCode;
@@ -148,6 +160,8 @@ export interface RoomJoined {
 export interface PublicSeat {
   seat: number;
   name: string | null;
+  /** Played by the computer. */
+  bot: boolean;
   connected: boolean;
   ready: boolean;
   rackCount: number;
@@ -161,7 +175,13 @@ export interface PublicState {
   version: number;
   phase: Phase;
   roundNumber: number;
+  /** One round per player. Before the start: the rounds a start right now would give. */
   totalRounds: number;
+  /** Seat that may add bots and start the game. */
+  host: number;
+  /** Seats in the tournament (ascending); in the lobby, the seats taken so far. */
+  players: number[];
+  minPlayers: number;
   seats: PublicSeat[];
   activeSeat: number | null;
   starter: number | null;
@@ -199,6 +219,9 @@ export interface ClientToServerEvents {
   create_room: (payload: CreateRoomPayload, ack: AckFn<RoomJoined>) => void;
   join_room: (payload: JoinRoomPayload, ack: AckFn<RoomJoined>) => void;
   player_ready: (payload: PlayerReadyPayload, ack: AckFn) => void;
+  add_bot: (payload: AddBotPayload, ack: AckFn) => void;
+  remove_bot: (payload: RemoveBotPayload, ack: AckFn) => void;
+  start_game: (payload: StartGamePayload, ack: AckFn) => void;
   draw_tile: (payload: DrawTilePayload, ack: AckFn) => void;
   discard_tile: (payload: DiscardTilePayload, ack: AckFn) => void;
   sort_rack: (payload: SortRackPayload, ack: AckFn) => void;
@@ -216,6 +239,9 @@ export const CLIENT_EVENTS = [
   'create_room',
   'join_room',
   'player_ready',
+  'add_bot',
+  'remove_bot',
+  'start_game',
   'draw_tile',
   'discard_tile',
   'sort_rack',
