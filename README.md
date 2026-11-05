@@ -96,52 +96,38 @@ Set `WEB_DIST_DIR=../web/dist`, build with `npm ci --include=dev && npm run buil
 
 ### Backend on a VPS
 
+Ubuntu 24.04. `bootstrap.sh` installs Node.js 22, Caddy (automatic HTTPS and WebSocket proxying), a firewall and swap; run it once per VPS. `zhol.sh` installs the server from `main` as a `zhol` system user at `/srv/zhol`, listening on `127.0.0.1:3001` behind Caddy, with the database at `/var/lib/zhol/zhol.db`.
+
 ```bash
-# as a deploy user, Node 22 installed
-git clone <repo> /srv/zhol && cd /srv/zhol
-npm ci && npm run build -w @zhol/server
-sudo mkdir -p /var/lib/zhol && sudo chown $USER /var/lib/zhol
+curl -fsSL https://raw.githubusercontent.com/dRAKOS998/zhol/main/deploy/vps/bootstrap.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/dRAKOS998/zhol/main/deploy/vps/zhol.sh | sudo bash -s -- "https://zhol.vercel.app"
 ```
 
-systemd unit `/etc/systemd/system/zhol.service`:
+The argument is a comma-separated list of frontend origins; the first is used for invite links. The script prints the backend URL to use as `VITE_SERVER_URL` (a free `zhol.<ip>.sslip.io` name until you set a domain).
 
-```ini
-[Unit]
-Description=Zhol game server
-After=network.target
+| Task | Command |
+| --- | --- |
+| Deploy the latest `main` | `sudo update-zhol` |
+| Change frontend origins | `sudo update-zhol "https://zhol.example.com,https://zhol.vercel.app"` |
+| Use your own domain (DNS pointing at the VPS first) | `sudo ZHOL_HOST=api.zhol.example.com update-zhol` |
+| Logs | `journalctl -u zhol -f` |
 
-[Service]
-WorkingDirectory=/srv/zhol
-ExecStart=/usr/bin/node apps/server/dist/index.js
-Environment=NODE_ENV=production PORT=3001 HOST=127.0.0.1 TRUST_PROXY=true
-Environment=DATABASE_PATH=/var/lib/zhol/zhol.db
-Environment=ALLOWED_ORIGINS=https://zhol.vercel.app PUBLIC_WEB_URL=https://zhol.vercel.app
-Restart=always
-User=deploy
+Run exactly one instance: room state is serialized in-process.
 
-[Install]
-WantedBy=multi-user.target
+**Back up** while the server runs. A plain file copy can miss recent data in WAL mode, so use SQLite's backup API, then copy the result off the server:
+
+```bash
+cd /srv/zhol && sudo -u zhol node -e "require('better-sqlite3')('/var/lib/zhol/zhol.db').backup('/var/lib/zhol/backup.db').then(() => console.log('ok'))"
 ```
 
-nginx with HTTPS (certbot) and WebSocket upgrade:
+**Restore** a backup, including one taken from another host:
 
-```nginx
-server {
-  server_name api.zhol.example;
-  location / {
-    proxy_pass http://127.0.0.1:3001;
-    proxy_http_version 1.1;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection "upgrade";
-    proxy_set_header Host $host;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_read_timeout 120s;
-  }
-  listen 443 ssl; # managed by certbot
-}
+```bash
+sudo systemctl stop zhol
+sudo rm -f /var/lib/zhol/zhol.db-wal /var/lib/zhol/zhol.db-shm
+sudo install -o zhol -g zhol -m 640 backup.db /var/lib/zhol/zhol.db
+sudo systemctl start zhol
 ```
-
-Back up `/var/lib/zhol/zhol.db*` (WAL mode: copy with `sqlite3 zhol.db ".backup backup.db"`).
 
 ### Frontend on Vercel
 
