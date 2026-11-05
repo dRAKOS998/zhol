@@ -1,11 +1,12 @@
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import type { RackEntry } from '@zhol/engine';
 import type { DrawSource, PlayerView, ProtocolError, PublicSeat, PublicState } from '@zhol/protocol';
 import { client, type ConnectionStatus } from '../lib/client';
 import { errorText, formatScore, tileLabel } from '../lib/i18n';
 import { FlightLayer, type FlightRequest, anchorRect, reducedMotion, tileBoxIn, useFlights } from './Flights';
 import { Modal } from './Modal';
-import { Rack } from './Rack';
+import { Rack, moveInLayout } from './Rack';
+import { createPortal } from 'react-dom';
 import { Rules } from './Rules';
 import { ScoreSummary, ScoreTable, winnersText } from './Scoreboard';
 import { TileBack, TileFace } from './Tile';
@@ -59,8 +60,9 @@ function Confetti() {
 
 type DropKind = 'discard' | 'close';
 interface Parked {
-  id: string;
-  kind: DropKind;
+  /** The tile, or null for a face-down tile just taken from the stock. */
+  id: string | null;
+  kind: DropKind | 'draw';
   from: DOMRect;
   to: DOMRect;
   confirmed: boolean;
@@ -86,7 +88,7 @@ function ParkedTile({ parked }: { parked: Parked }) {
   }, [parked]);
   return (
     <div ref={ref} className={`parked-tile ${parked.kind === 'close' ? 'is-closing' : ''}`} style={{ width: parked.to.width }} aria-hidden="true">
-      <TileFace id={parked.id} size="rack" />
+      {parked.id ? <TileFace id={parked.id} size="rack" /> : <TileBack className="tile-fill" />}
     </div>
   );
 }
@@ -179,8 +181,17 @@ export function GameTable({ view, rack, status }: Props) {
         if (ev.seat === me) {
           const held = new Set((before?.rack ?? []).map((e) => e.id));
           const fresh = rack.find((e) => !held.has(e.id));
-          const el = fresh && document.querySelector(`.rack [data-tile="${fresh.id}"]`);
-          if (from && el) reqs.push({ from, to: el.getBoundingClientRect(), tile: fresh.id, arc: -70 });
+          const dropped = dropDraw.current;
+          dropDraw.current = null;
+          if (dropped) {
+            // Dragged into the rack: it's already there, in the slot it was let go over.
+            if (fresh && dropped.slot !== null && !rack.some((e) => e.slot === dropped.slot)) {
+              void client.sortRack(moveInLayout(rack, fresh.id, dropped.slot));
+            }
+          } else {
+            const el = fresh && document.querySelector(`.rack [data-tile="${fresh.id}"]`);
+            if (from && el) reqs.push({ from, to: el.getBoundingClientRect(), tile: fresh.id, arc: -70 });
+          }
         } else {
           const to = anchorRect(`opp-${ev.seat}`);
           const shown = ev.source === 'previous_discard' ? b.seats[prevOf(ev.seat)]!.discardTop : null;
@@ -219,24 +230,21 @@ export function GameTable({ view, rack, status }: Props) {
   const [leaving, setLeaving] = useState<string | null>(null);
   const [parked, setParked] = useState<Parked | null>(null);
   const parkedRef = useRef<Parked | null>(null);
-  const draw = (source: DrawSource) => !busy && canDraw && run(() => client.draw(source));
-  /** Throw a tile onto my pile ('discard') or onto the stock to close the round ('close'). */
-  const throwTile = (kind: DropKind, id: string, from?: DOMRect) => {
-    if (busy || !canDiscard) return;
-    const rackEl = document.querySelector(`.rack [data-tile="${id}"] .tile`);
-    const start = from ?? rackEl?.getBoundingClientRect();
-    const target = kind === 'discard' ? document.querySelector(`[data-anchor="pile-${me}"] .tile`) : document.querySelector('[data-anchor="stock"] .stack-1');
-    const end = target?.getBoundingClientRect();
-    const p: Parked = { id, kind, from: start ?? end!, to: end ?? start!, confirmed: false };
-    if (start || end) {
-      parkedRef.current = p;
-      setParked(p);
-    }
-    setLeaving(id);
-    setSelected(null);
-    void run(() => (kind === 'close' ? client.declareWin(id) : client.discard(id))).then((ack) => {
-      if (ack.ok && parkedRef.current === p) {
-        // Keep it lying there until the new table state arrives (it follows the answer).
+  /** The next drawn tile appears in place at once (it was dragged there) instead of flying in. */
+  const [instantFresh, setInstantFresh] = useState(false);
+  const draw = (source: DrawSource) => {
+    if (busy || !canDraw) return;
+    setInstantFresh(false);
+    void run(() => client.draw(source));
+  };
+
+  /** Show a tile lying at `p` until the command is answered and the new state has arrived. */
+  const parkUntilAnswered = (p: Parked, ack: Promise<{ ok: boolean }>) => {
+    parkedRef.current = p;
+    setParked(p);
+    void ack.then((a) => {
+      if (parkedRef.current !== p) return;
+      if (a.ok) {
         p.confirmed = true;
         setTimeout(() => {
           if (parkedRef.current === p) {
@@ -246,12 +254,110 @@ export function GameTable({ view, rack, status }: Props) {
           }
         }, 2500);
       } else {
-        // Refused (e.g. the rest isn't all linked): the tile goes back to the rack.
         parkedRef.current = null;
         setParked(null);
         setLeaving(null);
       }
     });
+  };
+
+  // ---- drawing by dragging: from the stock or the pile on my left, into the rack ------------
+  type Pull = { source: DrawSource; tile: string | null; pointerId: number; sx: number; sy: number; x: number; y: number; active: boolean; w: number; offX: number; offY: number };
+  const pull = useRef<Pull | null>(null);
+  const [pullGhost, setPullGhost] = useState<{ tile: string | null; w: number } | null>(null);
+  const pullEl = useRef<HTMLDivElement | null>(null);
+  const suppressClick = useRef(false);
+  /** A draw that was dropped on the rack: where to put the new tile once it arrives. */
+  const dropDraw = useRef<{ slot: number | null } | null>(null);
+  const rackBox = () => document.querySelector('[data-anchor="rack"]')?.getBoundingClientRect() ?? null;
+  const overRack = (x: number, y: number) => {
+    const r = rackBox();
+    return !!r && x >= r.left - 10 && x <= r.right + 10 && y >= r.top - 40 && y <= r.bottom + 10;
+  };
+  const emptySlotAt = (x: number, y: number): HTMLElement | null => document.elementFromPoint(x, y)?.closest<HTMLElement>('.rack .rack-slot-empty') ?? null;
+  const markPull = (x: number | null, y: number | null) => {
+    const inRack = x !== null && y !== null && overRack(x, y);
+    document.querySelector('[data-anchor="rack"]')?.classList.toggle('is-pull-hot', inRack);
+    const slot = inRack ? emptySlotAt(x!, y!) : null;
+    document.querySelectorAll('.rack .is-pull-target').forEach((el) => el !== slot && el.classList.remove('is-pull-target'));
+    slot?.classList.add('is-pull-target');
+  };
+  const endPull = () => {
+    pull.current = null;
+    setPullGhost(null);
+    markPull(null, null);
+    document.body.classList.remove('is-dragging-tile');
+  };
+  useLayoutEffect(() => {
+    if (!pullGhost) return;
+    let raf = 0;
+    const frame = () => {
+      const p = pull.current;
+      if (p && pullEl.current) pullEl.current.style.transform = `translate3d(${p.x - p.offX}px, ${p.y - p.offY}px, 0) rotate(-4deg) scale(1.12)`;
+      raf = requestAnimationFrame(frame);
+    };
+    frame();
+    return () => cancelAnimationFrame(raf);
+  }, [pullGhost]);
+  const pullFrom = (source: DrawSource, tile: string | null) => ({
+    onPointerDown: (e: ReactPointerEvent<HTMLButtonElement>) => {
+      if (!canDraw || busy || e.button !== 0) return;
+      const r = (e.currentTarget.querySelector('.stack-1, .tile') ?? e.currentTarget).getBoundingClientRect();
+      pull.current = { source, tile, pointerId: e.pointerId, sx: e.clientX, sy: e.clientY, x: e.clientX, y: e.clientY, active: false, w: r.width, offX: e.clientX - r.left, offY: e.clientY - r.top };
+      e.currentTarget.setPointerCapture(e.pointerId);
+    },
+    onPointerMove: (e: ReactPointerEvent<HTMLButtonElement>) => {
+      const p = pull.current;
+      if (!p || p.pointerId !== e.pointerId) return;
+      p.x = e.clientX;
+      p.y = e.clientY;
+      if (!p.active) {
+        if (Math.hypot(p.x - p.sx, p.y - p.sy) <= 4) return;
+        p.active = true;
+        setPullGhost({ tile: p.tile, w: p.w });
+        document.body.classList.add('is-dragging-tile');
+      }
+      markPull(p.x, p.y);
+    },
+    onPointerUp: (e: ReactPointerEvent<HTMLButtonElement>) => {
+      const p = pull.current;
+      if (!p || p.pointerId !== e.pointerId) return;
+      const ghostRect = pullEl.current?.getBoundingClientRect();
+      endPull();
+      if (!p.active) return; // a plain tap: the click handler draws
+      suppressClick.current = true;
+      if (!overRack(e.clientX, e.clientY)) return; // let go elsewhere: nothing happens
+      const slotEl = emptySlotAt(e.clientX, e.clientY);
+      const slot = slotEl ? Number(slotEl.dataset.slot) : null;
+      dropDraw.current = { slot };
+      setInstantFresh(true);
+      const to = slotEl?.getBoundingClientRect() ?? ghostRect;
+      const from = ghostRect ?? to;
+      if (from && to) parkUntilAnswered({ id: p.tile, kind: 'draw', from, to: new DOMRect(to.left, to.top, to.width, to.width * 1.4), confirmed: false }, run(() => client.draw(p.source)));
+      else void run(() => client.draw(p.source));
+    },
+    onPointerCancel: () => endPull(),
+    onClick: () => {
+      if (suppressClick.current) {
+        suppressClick.current = false;
+        return;
+      }
+      draw(source);
+    },
+  });
+  /** Throw a tile onto my pile ('discard') or onto the stock to close the round ('close'). */
+  const throwTile = (kind: DropKind, id: string, from?: DOMRect) => {
+    if (busy || !canDiscard) return;
+    const rackEl = document.querySelector(`.rack [data-tile="${id}"] .tile`);
+    const start = from ?? rackEl?.getBoundingClientRect();
+    const target = kind === 'discard' ? document.querySelector(`[data-anchor="pile-${me}"] .tile`) : document.querySelector('[data-anchor="stock"] .stack-1');
+    const end = target?.getBoundingClientRect();
+    setLeaving(id);
+    setSelected(null);
+    // Refused (e.g. the rest isn't all linked): the tile goes back to the rack.
+    const ack = run(() => (kind === 'close' ? client.declareWin(id) : client.discard(id)));
+    if (start || end) parkUntilAnswered({ id, kind, from: start ?? end!, to: end ?? start!, confirmed: false }, ack);
+    else void ack.finally(() => setLeaving(null));
   };
   const canThrow = canDiscard && !busy;
   const setReady = (ready: boolean) => run(() => client.setReady(ready));
@@ -356,7 +462,7 @@ export function GameTable({ view, rack, status }: Props) {
             <span key={i} className="tile tile-table tile-under" style={{ '--k': i + 1 } as CSSProperties} aria-hidden="true" />
           ))}
           {takeable ? (
-            <button type="button" className="pile-take" onClick={() => draw('previous_discard')} disabled={busy} aria-label={`Merr gurin e hedhur nga ${name(seat)}: ${tileLabel(p.discardTop!)}`}>
+            <button type="button" className="pile-take" {...pullFrom('previous_discard', p.discardTop)} disabled={busy} aria-label={`Merr gurin e hedhur nga ${name(seat)}: ${tileLabel(p.discardTop!)}`}>
               {content}
             </button>
           ) : mine && canThrow && selected ? (
@@ -470,7 +576,7 @@ export function GameTable({ view, rack, status }: Props) {
                       {stockStack}
                     </button>
                   ) : canDraw ? (
-                    <button type="button" className="stock-btn" data-anchor="stock" onClick={() => draw('stock')} disabled={busy || s.stockCount === 0} aria-label={`Tërhiq një gur nga stoku. Mbeten ${s.stockCount}.`}>
+                    <button type="button" className="stock-btn" data-anchor="stock" {...pullFrom('stock', null)} disabled={busy || s.stockCount === 0} aria-label={`Tërhiq një gur nga stoku. Mbeten ${s.stockCount}.`}>
                       {stockStack}
                     </button>
                   ) : (
@@ -529,12 +635,20 @@ export function GameTable({ view, rack, status }: Props) {
             canDrop={canThrow}
             onDrop={(kind, id, rect) => throwTile(kind, id, rect)}
             hiddenTile={leaving}
+            instantFresh={instantFresh}
           />
         </div>
       </section>
 
       <FlightLayer flights={flights} onDone={done} />
-      {parked && <ParkedTile key={parked.id} parked={parked} />}
+      {parked && <ParkedTile key={parked.id ?? 'draw'} parked={parked} />}
+      {pullGhost &&
+        createPortal(
+          <div ref={pullEl} className="rack-ghost" style={{ width: pullGhost.w }} aria-hidden="true">
+            {pullGhost.tile ? <TileFace id={pullGhost.tile} size="rack" /> : <TileBack className="tile-fill" />}
+          </div>,
+          document.body,
+        )}
 
       <Modal open={scoreOpen} title={s.phase === 'TOURNAMENT_COMPLETE' ? 'Rezultati përfundimtar' : 'Tabela e pikëve'} onClose={() => setScoreOpen(false)} wide>
         <ScoreTable state={s} mySeat={me} />

@@ -23,6 +23,8 @@ interface RackProps {
   onDrop?: (kind: 'discard' | 'close', id: string, from: DOMRect) => void;
   /** A tile already on its way to the pile: keep its slot empty. */
   hiddenTile?: string | null;
+  /** The freshly drawn tile was dragged into place: show it at once, no landing delay. */
+  instantFresh?: boolean;
 }
 
 interface DragState {
@@ -63,7 +65,7 @@ const posName = (slot: number) => `${rowName(slot)}, vendi ${(slot % SLOTS_PER_R
  * tap an empty slot, and keyboard (arrows move focus, Shift+arrows move the
  * tile, Enter/Space select). Nothing here can discard a tile.
  */
-export function Rack({ rack, selected, onSelect, onLayout, dealKey = null, animateDeal = false, closeMode = false, canDrop = false, onDrop, hiddenTile = null }: RackProps) {
+export function Rack({ rack, selected, onSelect, onLayout, dealKey = null, animateDeal = false, closeMode = false, canDrop = false, onDrop, hiddenTile = null, instantFresh = false }: RackProps) {
   const bySlot = useMemo(() => {
     const m = new Map<number, string>();
     rack.forEach((e) => m.set(e.slot, e.id));
@@ -318,7 +320,7 @@ export function Rack({ rack, selected, onSelect, onLayout, dealKey = null, anima
         Shigjetat lëvizin fokusin nëpër raft. Enter ose hapësira zgjedh një gur ose e vendos gurin e zgjedhur në një vend bosh.
         Shift bashkë me një shigjetë e zhvendos gurin. Renditja nuk hedh asnjë gur.
       </p>
-      <div className={`rack ${dealing ? 'is-dealing' : ''} ${closeMode ? 'is-closing' : ''}`} role="group" aria-label="Rafti yt" aria-describedby="rack-help" onKeyDown={onKeyDown}>
+      <div className={`rack ${dealing ? 'is-dealing' : ''} ${closeMode ? 'is-closing' : ''} ${instantFresh ? 'fresh-instant' : ''}`} role="group" aria-label="Rafti yt" aria-describedby="rack-help" onKeyDown={onKeyDown}>
         {[0, 1].map((row) => (
           <div className="rack-tier" key={row}>
             {Array.from({ length: SLOTS_PER_ROW }, (_, i) => renderSlot(row * SLOTS_PER_ROW + i))}

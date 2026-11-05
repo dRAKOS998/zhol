@@ -50,6 +50,38 @@ body,
 #root {
   height: 100%;
 }
+/* no pull-to-refresh or bounce: dragging tiles must never reload or scroll the page */
+html,
+body {
+  overscroll-behavior: none;
+}
+.stock-btn,
+.pile-take,
+.pile-throw {
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+/* dragging a tile in from the stock or the left pile: the rack and the slot under it light up */
+[data-anchor='rack'] {
+  border-radius: 16px;
+  transition: box-shadow 0.2s;
+}
+[data-anchor='rack'].is-pull-hot {
+  box-shadow:
+    0 0 0 3px var(--brass-hi),
+    0 0 34px rgba(255, 217, 120, 0.55);
+}
+.rack-slot-empty.is-pull-target::before {
+  background: rgba(255, 217, 120, 0.4);
+  box-shadow:
+    inset 0 0 0 2px var(--brass-hi),
+    0 0 16px rgba(255, 217, 120, 0.6);
+}
+.rack.fresh-instant .rack-slot-tile.is-fresh .tile {
+  animation: none;
+}
 
 body {
   margin: 0;
