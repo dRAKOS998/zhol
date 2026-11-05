@@ -12,7 +12,7 @@ export const COLOR_NAME: Record<Color, string> = {
 
 export function tileLabel(id: TileId): string {
   const t = parseTile(id);
-  return t.kind === 'zhol' ? 'Zhol (gur i lirë)' : `${t.rank} ${COLOR_NAME[t.color]}`;
+  return t.kind === 'zhol' ? 'Zhol (xhoker)' : `${t.rank} ${COLOR_NAME[t.color]}`;
 }
 
 const ERRORS: Record<string, string> = {

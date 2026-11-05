@@ -8,8 +8,7 @@ export function Rules() {
         Zhol. Çdo ngjyrë ka edhe një shenjë: e kuqja një romb, e zeza një katror, bluja një rreth dhe e verdha një trekëndësh.
       </p>
       <p>
-        Në fillim të çdo dore kthehet një gur tregues. Ai shërben vetëm për informacion dhe nuk luhet. Vetëm dy gurët Zhol
-        janë gurë të lirë.
+        Xhokerët janë vetëm dy gurët Zhol (me kapelen e xhokerit). Asnjë gur me numër nuk bëhet xhoker.
       </p>
       <h3>Lidhjet</h3>
       <ul>

@@ -19,6 +19,22 @@ function Mark({ color }: { color: string }) {
   }
 }
 
+/** The joker's face: a three-pointed jester's cap with bells, in the tile colours. */
+function JokerHat() {
+  return (
+    <svg viewBox="0 0 40 34" className="tile-zhol-hat">
+      <path d="M9 27 C9 18 7 12 3 8 C11 9 16 14 18 22 Z" fill="var(--ink-red)" />
+      <path d="M31 27 C31 18 33 12 37 8 C29 9 24 14 22 22 Z" fill="var(--ink-blue)" />
+      <path d="M13 26 C13 16 16 9 20 4 C24 9 27 16 27 26 Z" fill="var(--ink-zhol)" />
+      <rect x="7" y="24" width="26" height="7" rx="3.5" fill="var(--ink-yellow)" />
+      <path d="M11 27.5h18" stroke="#fff6" strokeWidth="1.2" strokeDasharray="2 2.4" />
+      <circle cx="3" cy="8" r="2.6" fill="var(--ink-yellow)" />
+      <circle cx="20" cy="4" r="2.6" fill="var(--ink-yellow)" />
+      <circle cx="37" cy="8" r="2.6" fill="var(--ink-yellow)" />
+    </svg>
+  );
+}
+
 export interface TileFaceProps {
   id: TileId;
   /** Visual size preset; the face always scales with its container width. */
@@ -33,9 +49,7 @@ export const TileFace = memo(function TileFace({ id, size = 'rack', className = 
     <span className={`tile tile-${size} ${className}`} data-tile-id={id} aria-label={tileLabel(id)} role="img">
       {t.kind === 'zhol' ? (
         <span className="tile-zhol" aria-hidden="true">
-          <svg viewBox="0 0 20 20" className="tile-zhol-star">
-            <path d="M10 1 L12.4 7.6 L19 10 L12.4 12.4 L10 19 L7.6 12.4 L1 10 L7.6 7.6 Z" fill="currentColor" />
-          </svg>
+          <JokerHat />
           <span className="tile-zhol-word">Zhol</span>
         </span>
       ) : (

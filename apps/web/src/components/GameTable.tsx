@@ -421,10 +421,6 @@ export function GameTable({ view, rack, status }: Props) {
               </div>
             ) : (
               <>
-                <div className="indicator">
-                  {s.indicator && <TileFace key={s.indicator} id={s.indicator} size="table" className="indicator-tile" />}
-                  <span className="center-label">Treguesi</span>
-                </div>
                 <div className="stock">
                   {canDraw ? (
                     <button type="button" className="stock-btn" data-anchor="stock" onClick={() => draw('stock')} disabled={busy || s.stockCount === 0} aria-label={`Tërhiq një gur nga stoku. Mbeten ${s.stockCount}.`}>
