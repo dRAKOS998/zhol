@@ -15,6 +15,11 @@ interface RackProps {
   animateDeal?: boolean;
   /** Closing the round: tiles glow to invite choosing the final discard. */
   closeMode?: boolean;
+  /** It is my turn to throw: a tile dropped on the element marked `data-drop="discard"` is thrown. */
+  canDropDiscard?: boolean;
+  onDropDiscard?: (id: string, from: DOMRect) => void;
+  /** A tile already on its way to the pile: keep its slot empty. */
+  hiddenTile?: string | null;
 }
 
 interface DragState {
@@ -55,7 +60,7 @@ const posName = (slot: number) => `${rowName(slot)}, vendi ${(slot % SLOTS_PER_R
  * tap an empty slot, and keyboard (arrows move focus, Shift+arrows move the
  * tile, Enter/Space select). Nothing here can discard a tile.
  */
-export function Rack({ rack, selected, onSelect, onLayout, dealKey = null, animateDeal = false, closeMode = false }: RackProps) {
+export function Rack({ rack, selected, onSelect, onLayout, dealKey = null, animateDeal = false, closeMode = false, canDropDiscard = false, onDropDiscard, hiddenTile = null }: RackProps) {
   const bySlot = useMemo(() => {
     const m = new Map<number, string>();
     rack.forEach((e) => m.set(e.slot, e.id));
@@ -128,6 +133,16 @@ export function Rack({ rack, selected, onSelect, onLayout, dealKey = null, anima
     d.drawnX = x;
     el.style.transform = `translate3d(${x - d.offX}px, ${y - d.offY}px, 0) rotate(${d.tilt.toFixed(1)}deg) scale(1.12)`;
   };
+  /** Is (x, y) over my discard pile? Generous margin: a near miss still counts. */
+  const overDiscard = (x: number, y: number): HTMLElement | null => {
+    if (!canDropDiscard) return null;
+    const el = document.querySelector<HTMLElement>('[data-drop="discard"]');
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    const m = 28;
+    return x >= r.left - m && x <= r.right + m && y >= r.top - m && y <= r.bottom + m ? el : null;
+  };
+  const markDiscard = (on: boolean) => document.querySelector('[data-drop="discard"]')?.classList.toggle('is-drop-hot', on);
   const slotUnder = (x: number, y: number): number | null => {
     const el = document.elementFromPoint(x, y)?.closest<HTMLElement>('.rack [data-slot]');
     return el ? Number(el.dataset.slot) : null;
@@ -162,7 +177,9 @@ export function Rack({ rack, selected, onSelect, onLayout, dealKey = null, anima
       d.active = true;
       setGhost({ id: d.id, width: d.width });
       onSelect(null);
+      document.body.classList.add('is-dragging-tile');
     }
+    markDiscard(!!overDiscard(e.clientX, e.clientY));
     const over = slotUnder(e.clientX, e.clientY);
     setOverSlot((cur) => (cur === over ? cur : over));
   };
@@ -180,6 +197,8 @@ export function Rack({ rack, selected, onSelect, onLayout, dealKey = null, anima
      
   }, [ghost]);
   const endDrag = () => {
+    markDiscard(false);
+    document.body.classList.remove('is-dragging-tile');
     drag.current = null;
     setGhost(null);
     setOverSlot(null);
@@ -189,6 +208,10 @@ export function Rack({ rack, selected, onSelect, onLayout, dealKey = null, anima
     if (!d || d.pointerId !== e.pointerId) return;
     endDrag();
     if (!d.active) return toggle(d.id); // a tap selects
+    if (overDiscard(e.clientX, e.clientY) && onDropDiscard) {
+      const g = ghostEl.current?.getBoundingClientRect();
+      return onDropDiscard(d.id, g ?? new DOMRect(e.clientX - d.offX, e.clientY - d.offY, d.width, d.width * 1.4));
+    }
     const to = slotUnder(e.clientX, e.clientY);
     if (to !== null) {
       move(d.id, to);
@@ -263,7 +286,7 @@ export function Rack({ rack, selected, onSelect, onLayout, dealKey = null, anima
         key={slot}
         type="button"
         {...common}
-        className={`rack-slot rack-slot-tile ${isSel ? 'is-selected' : ''} ${ghost?.id === id ? 'is-dragging' : ''} ${fresh === id ? 'is-fresh' : ''} ${overSlot === slot && ghost?.id !== id ? 'is-drop-target' : ''} ${dropped === id ? 'is-dropped' : ''}`}
+        className={`rack-slot rack-slot-tile ${isSel ? 'is-selected' : ''} ${ghost?.id === id ? 'is-dragging' : ''} ${fresh === id ? 'is-fresh' : ''} ${overSlot === slot && ghost?.id !== id ? 'is-drop-target' : ''} ${dropped === id ? 'is-dropped' : ''} ${hiddenTile === id ? 'is-leaving' : ''}`}
         style={{ '--d': dealOrder.get(id) ?? 0 } as CSSProperties}
         aria-pressed={isSel}
         aria-label={`${tileLabel(id)}, ${posName(slot)}${isSel ? ', i zgjedhur' : ''}`}

@@ -883,6 +883,8 @@ body {
   flex-direction: column;
   max-width: 1280px;
   margin: 0 auto;
+  /* glows and hints at the table's edge must never cause sideways scrolling on phones */
+  overflow-x: clip;
   padding: env(safe-area-inset-top) max(8px, env(safe-area-inset-right)) env(safe-area-inset-bottom) max(8px, env(safe-area-inset-left));
 }
 .topbar {
@@ -1109,6 +1111,63 @@ body {
       0 0 0 4px var(--brass),
       0 0 22px rgba(232, 184, 74, 0.55);
   }
+}
+/* my pile, when it's my turn to throw: tap it with a tile selected, or drop a tile on it */
+.pile.can-drop .pile-stack {
+  border-radius: 12px;
+  box-shadow: 0 0 0 2px rgba(255, 217, 120, 0.55);
+  animation: beckon 1.6s ease-in-out infinite;
+}
+.pile-throw {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: none;
+  border-radius: 10px;
+  cursor: pointer;
+}
+.pile-throw:hover .tile,
+.pile-throw:hover .tile-empty {
+  transform: translateY(-3px);
+}
+.drop-hint {
+  position: absolute;
+  left: 50%;
+  bottom: -10px;
+  transform: translateX(-50%);
+  z-index: 3;
+  padding: 0.1rem 0.5rem;
+  border-radius: 99px;
+  white-space: nowrap;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #3a2504;
+  background: linear-gradient(180deg, var(--brass-hi), var(--brass));
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+  animation: pop 0.3s var(--spring) both;
+}
+.pile.is-closing .drop-hint {
+  background: var(--ivory);
+  color: var(--ink-red);
+}
+/* while a tile is being dragged, the pile calls out; when the tile is over it, it opens up */
+.is-dragging-tile .pile.can-drop .pile-stack {
+  transform: scale(1.08);
+  box-shadow:
+    0 0 0 3px var(--brass-hi),
+    0 0 26px rgba(255, 217, 120, 0.6);
+  transition: transform 0.2s var(--spring);
+}
+.pile.can-drop.is-drop-hot .pile-stack {
+  transform: scale(1.22) rotate(-3deg);
+  background: rgba(255, 217, 120, 0.25);
+  box-shadow:
+    0 0 0 4px var(--brass-hi),
+    0 0 40px rgba(255, 217, 120, 0.85);
+}
+.rack-slot-tile.is-leaving .tile {
+  opacity: 0;
 }
 .tile.is-landing {
   animation: land 0.32s ease-out both 0.44s;

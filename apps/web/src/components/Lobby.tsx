@@ -37,7 +37,8 @@ function CloseIcon() {
   );
 }
 
-const CHAIRS = ['chair-s', 'chair-w', 'chair-n', 'chair-e'] as const;
+// Me at the bottom, the next player on my right, then across, then on my left.
+const CHAIRS = ['chair-s', 'chair-e', 'chair-n', 'chair-w'] as const;
 
 export function Lobby({ state, mySeat }: { state: PublicState; mySeat: number }) {
   const [copied, setCopied] = useState<'ok' | 'fail' | null>(null);
