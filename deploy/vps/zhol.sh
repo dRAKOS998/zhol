@@ -7,6 +7,12 @@
 # Frontend origins are comma-separated; the first one is used for invite links.
 # A failed build leaves the running server untouched. The script exits non-zero if the server
 # is not healthy afterwards.
+#
+# Auto-deploy: a systemd timer runs "update-zhol --if-changed" every minute. It restarts the server
+# only when a push touches backend files; a commit that failed is not retried until a newer one lands.
+# The last deployed commit is published at /deployed-commit so Vercel can wait for the backend.
+#   Pause: sudo systemctl disable --now zhol-autodeploy.timer
+#   Logs:  journalctl -u zhol-autodeploy -f
 set -euo pipefail
 
 REPO="${ZHOL_REPO:-https://github.com/dRAKOS998/zhol.git}"
@@ -16,8 +22,41 @@ DATA_DIR=/var/lib/zhol
 ENV_FILE="$APP_DIR/apps/server/.env"
 SITE_FILE=/etc/caddy/sites/zhol.caddy
 PORT=3001
+STATUS_DIR=/srv/zhol-status
+FAILED_FILE="$DATA_DIR/autodeploy-failed-commit"
+# A push touching anything else (the web app, docs) needs no backend restart.
+BACKEND_PATHS='^(apps/server/|packages/|package\.json$|package-lock\.json$|deploy/vps/zhol\.sh$)'
 
 die() { echo "ERROR: $*" >&2; exit 1; }
+
+as_zhol() { sudo -u zhol -H "$@"; }
+
+publish_commit() { as_zhol git -C "$APP_DIR" rev-parse HEAD > "$STATUS_DIR/deployed-commit"; }
+
+# Timer entry point. Returns 0 to go on with a full deploy; exits when there is nothing to build.
+check_for_changes() {
+  [ -d "$APP_DIR/.git" ] || die "Not installed yet"
+  local remote deployed changed
+  remote="$(as_zhol git -C "$APP_DIR" ls-remote origin "refs/heads/$BRANCH" | cut -f1)" || exit 0
+  [ -n "$remote" ] || exit 0
+  # Compare with the last successful deploy, not HEAD: after a failed build HEAD is ahead of what runs.
+  deployed="$(cat "$STATUS_DIR/deployed-commit" 2>/dev/null || true)"
+  [ "$remote" != "$deployed" ] || exit 0
+  if [ "$remote" = "$(cat "$FAILED_FILE" 2>/dev/null || true)" ]; then exit 0; fi
+
+  as_zhol git -C "$APP_DIR" fetch --depth 1 origin "$BRANCH"
+  # If the two commits cannot be compared, assume the backend changed.
+  changed="$(as_zhol git -C "$APP_DIR" diff --name-only "$deployed" FETCH_HEAD 2>/dev/null)" || changed=apps/server/
+  if ! printf '%s\n' "$changed" | grep -Eq "$BACKEND_PATHS"; then
+    as_zhol git -C "$APP_DIR" reset --hard FETCH_HEAD
+    publish_commit
+    echo "==> $remote changes no backend files; no restart needed"
+    exit 0
+  fi
+  echo "==> Deploying $remote"
+  # shellcheck disable=SC2064 # the commit is fixed now, on purpose
+  trap "[ \$? -eq 0 ] || echo '$remote' > '$FAILED_FILE'" EXIT
+}
 
 set_env() { # KEY VALUE: replace the key in the env file, keeping every other line.
   { grep -v "^$1=" "$ENV_FILE" || true; echo "$1=$2"; } > "$ENV_FILE.new"
@@ -30,6 +69,17 @@ main() {
   [ "$(id -u)" -eq 0 ] || die "Run with sudo"
   node -v 2>/dev/null | grep -q '^v22\.' || die "Node.js 22 not found. Run bootstrap.sh first."
   [ -d /etc/caddy/sites ] || die "/etc/caddy/sites not found. Run bootstrap.sh first."
+
+  # One deploy at a time: the timer steps aside for a manual run, and the other way round is an error.
+  exec 9>/run/zhol-deploy.lock
+  if ! flock -n 9; then
+    [ "${1:-}" = "--if-changed" ] && exit 0
+    die "Another deploy is running: journalctl -u zhol-autodeploy -f"
+  fi
+  if [ "${1:-}" = "--if-changed" ]; then
+    check_for_changes
+    shift
+  fi
 
   local origins="${1:-${ZHOL_ORIGINS:-}}" origin host public_ip
   origins="$(printf '%s' "$origins" | tr -d '[:space:]')"
@@ -105,10 +155,36 @@ MemoryMax=600M
 WantedBy=multi-user.target
 UNIT
 
+  cat > /etc/systemd/system/zhol-autodeploy.service <<UNIT
+[Unit]
+Description=Deploy new Zhol commits
+After=network-online.target
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/update-zhol --if-changed
+UNIT
+
+  cat > /etc/systemd/system/zhol-autodeploy.timer <<UNIT
+[Unit]
+Description=Check for new Zhol commits every minute
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+[Install]
+WantedBy=timers.target
+UNIT
+
+  install -d "$STATUS_DIR"
   cat > "$SITE_FILE" <<SITE
 $host {
 	encode gzip
-	reverse_proxy 127.0.0.1:$PORT
+	handle /deployed-commit {
+		root * $STATUS_DIR
+		file_server
+	}
+	handle {
+		reverse_proxy 127.0.0.1:$PORT
+	}
 }
 SITE
 
@@ -118,6 +194,8 @@ SITE
   systemctl enable zhol >/dev/null
   systemctl restart zhol
   systemctl reload caddy
+  # After the first install or a manual run the timer may already be active; --now is safe either way.
+  systemctl enable --now zhol-autodeploy.timer >/dev/null 2>&1
 
   echo "==> Checking"
   local i
@@ -131,11 +209,15 @@ SITE
     echo "  HTTPS not ready yet (the certificate may take a minute): journalctl -u caddy -n 30"
   fi
 
+  publish_commit
+  rm -f "$FAILED_FILE"
+
   echo
   echo "Zhol backend:      https://$host   (set this as VITE_SERVER_URL on Vercel)"
   echo "Allowed frontends: $(grep '^ALLOWED_ORIGINS=' "$ENV_FILE" | cut -d= -f2)"
   echo "Database:          $DATA_DIR/zhol.db"
-  echo "Update later with: sudo update-zhol"
+  echo "Deployed commit:   $(cat "$STATUS_DIR/deployed-commit")"
+  echo "Auto-deploy:       on (checks every minute). Deploy now with: sudo update-zhol"
 }
 
 main "$@"

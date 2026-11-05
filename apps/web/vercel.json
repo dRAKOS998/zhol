@@ -1,7 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "installCommand": "cd ../.. && npm ci",
-  "buildCommand": "npm run build",
+  "buildCommand": "node scripts/wait-for-backend.mjs && npm run build",
   "outputDirectory": "dist",
   "rewrites": [{ "source": "/((?!assets/|favicon\\.svg).*)", "destination": "/index.html" }]
 }

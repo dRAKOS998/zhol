@@ -107,12 +107,16 @@ The argument is a comma-separated list of frontend origins; the first is used fo
 
 | Task | Command |
 | --- | --- |
-| Deploy the latest `main` | `sudo update-zhol` |
+| Deploy the latest `main` now | `sudo update-zhol` |
 | Change frontend origins | `sudo update-zhol "https://zhol.example.com,https://zhol.vercel.app"` |
 | Use your own domain (DNS pointing at the VPS first) | `sudo ZHOL_HOST=api.zhol.example.com update-zhol` |
-| Logs | `journalctl -u zhol -f` |
+| Server logs | `journalctl -u zhol -f` |
+| Auto-deploy logs | `journalctl -u zhol-autodeploy -f` |
+| Pause auto-deploy | `sudo systemctl disable --now zhol-autodeploy.timer` |
 
 Run exactly one instance: room state is serialized in-process.
+
+**Auto-deploy.** A push to `main` deploys both sides, backend first. A systemd timer on the VPS checks for new commits every minute and restarts the server only when a push touches `apps/server`, `packages`, the root package files or `zhol.sh`; a commit that fails is not retried until a newer one lands. On Vercel, `apps/web/scripts/wait-for-backend.mjs` holds the production build until `/deployed-commit` on the backend matches the commit, for up to 5 minutes, then fails so the current frontend stays live. Set `SKIP_BACKEND_WAIT=1` on Vercel to redeploy an older commit or deploy while the VPS is unavailable. The old frontend still runs against the new backend for a short time, so protocol changes must stay backward compatible for a deploy. Tests do not run as part of a deploy, so run `npm test` before pushing.
 
 **Back up** while the server runs. A plain file copy can miss recent data in WAL mode, so use SQLite's backup API, then copy the result off the server:
 
