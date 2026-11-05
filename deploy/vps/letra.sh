@@ -2,6 +2,7 @@
 # Install or update the LETRA game server on this VPS.
 #   First run:  curl -fsSL <url> | sudo bash -s -- "<frontend origins>"
 #   Update:     sudo update-letra
+#   New domain: sudo LETRA_HOST=letra-api.example.com update-letra "<frontend origins>"
 # The repository is private, so the first run creates a read-only deploy key and stops until
 # that key is added to GitHub (dRAKOS998/letra -> Settings -> Deploy keys).
 set -euo pipefail
@@ -11,8 +12,15 @@ REPO="git@github.com:dRAKOS998/letra.git"
 BRANCH="${LETRA_BRANCH:-letra/pishpirik-release}"
 APP_DIR=/srv/letra
 PORT=3002
-PUBLIC_IP="$(curl -fsS4 https://api.ipify.org || hostname -I | awk '{print $1}')"
-HOST="${LETRA_HOST:-letra.${PUBLIC_IP//./-}.sslip.io}"
+# Backend hostname: LETRA_HOST if given, else the one already configured, else a free sslip.io name.
+if [ -n "${LETRA_HOST:-}" ]; then
+  HOST="$LETRA_HOST"
+elif [ -f /etc/caddy/sites/letra.caddy ]; then
+  HOST="$(awk 'NR==1{print $1}' /etc/caddy/sites/letra.caddy)"
+else
+  PUBLIC_IP="$(curl -fsS4 https://api.ipify.org || hostname -I | awk '{print $1}')"
+  HOST="letra.${PUBLIC_IP//./-}.sslip.io"
+fi
 ORIGINS="${1:-${LETRA_CORS_ORIGINS:-}}"
 
 id letra >/dev/null 2>&1 || useradd --system --create-home --home-dir /home/letra --shell /usr/sbin/nologin letra
