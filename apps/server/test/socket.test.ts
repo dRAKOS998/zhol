@@ -30,6 +30,17 @@ async function table(seed = 42) {
 const turnArgs = (v: PlayerView) => ({ dealId: v.state.dealId!, turnId: v.state.turnId! });
 
 describe('rooms and seating', () => {
+  it('can serve the web app with an SPA fallback for invite links', async () => {
+    const dir = (await import('node:fs')).mkdtempSync((await import('node:path')).join((await import('node:os')).tmpdir(), 'zhol-web-'));
+    (await import('node:fs')).writeFileSync(`${dir}/index.html`, '<!doctype html><title>Zhol</title>');
+    const s = await startServer(tempDbPath(), 1, { webDistDir: dir });
+    servers.push(s.server);
+    const res = await fetch(`${s.url}/room/ABCD2345`);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain('<title>Zhol</title>');
+    expect((await fetch(`${s.url}/health`)).headers.get('content-type')).toContain('json');
+  });
+
   it('serves /health', async () => {
     const { url } = await setup();
     const res = await fetch(`${url}/health`);

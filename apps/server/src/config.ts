@@ -10,6 +10,8 @@ export interface ServerConfig {
   zholPenalty: number;
   testHarness: boolean;
   logRequests: boolean;
+  /** Optional: built web app to serve from this process (single-service deploys). */
+  webDistDir: string | null;
 }
 
 function parseBool(v: string | undefined): boolean {
@@ -51,5 +53,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     zholPenalty,
     testHarness,
     logRequests: env.LOG_LEVEL !== 'silent',
+    webDistDir: env.WEB_DIST_DIR ? path.resolve(env.WEB_DIST_DIR) : null,
   };
 }

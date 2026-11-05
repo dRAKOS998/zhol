@@ -26,6 +26,7 @@ export function testConfig(databasePath: string, overrides: Partial<ServerConfig
     zholPenalty: 20,
     testHarness: true,
     logRequests: false,
+    webDistDir: null,
     ...overrides,
   };
 }

@@ -1,4 +1,6 @@
+import fs from 'node:fs';
 import http from 'node:http';
+import path from 'node:path';
 import express from 'express';
 import { Server, type Socket } from 'socket.io';
 import { type DealPlan, type GameAction, type GameEvent, type Rng, assertValidDealPlan } from '@zhol/engine';
@@ -101,6 +103,25 @@ export function createZholServer({ config, rng = secureRng }: ZholServerOptions)
       }
     });
     log(config, 'test_harness_enabled');
+  }
+
+  // Optional single-service mode: serve the built web app with an SPA fallback for invite routes.
+  if (config.webDistDir) {
+    const indexFile = path.join(config.webDistDir, 'index.html');
+    if (!fs.existsSync(indexFile)) throw new Error(`WEB_DIST_DIR has no index.html: ${config.webDistDir}`);
+    app.use(
+      express.static(config.webDistDir, {
+        index: false,
+        setHeaders: (res, file) => {
+          if (file.includes(`${path.sep}assets${path.sep}`)) res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        },
+      }),
+    );
+    app.get(/^\/(?!socket\.io\/|health$|__test\/).*/, (_req, res) => {
+      res.setHeader('Cache-Control', 'no-cache');
+      res.sendFile(indexFile);
+    });
+    log(config, 'serving_web', { dir: config.webDistDir });
   }
 
   const httpServer = http.createServer(app);

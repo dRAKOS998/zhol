@@ -72,6 +72,7 @@ Opening the same room in two tabs of the same profile hands the seat to the newe
 | `DATABASE_PATH` | `./data/zhol.db` | SQLite file; must be on persistent storage in production |
 | `TRUST_PROXY` | `false` | `true` behind nginx/Render so rate limits see the real client IP |
 | `ZHOL_UNLINKED_PENALTY` | `20` | House rule: penalty for an unlinked Zhol |
+| `WEB_DIST_DIR` | — | Serve the built web app from the server too (single-service deploy), e.g. `../web/dist` |
 | `NODE_ENV` | — | `production` in production |
 | `ZHOL_TEST_HARNESS` | — | Test-only deal rigging. Refuses to start unless `NODE_ENV=test`; never set in production |
 
@@ -88,6 +89,10 @@ Opening the same room in two tabs of the same profile hands the seat to the newe
 1. Push the repo to GitHub and create a **Blueprint** from `render.yaml`. It defines one Node web service with a **1 GB persistent disk at `/var/data`** (`DATABASE_PATH=/var/data/zhol.db`) and `/health` as the health check.
 2. Set `ALLOWED_ORIGINS` and `PUBLIC_WEB_URL` to the Vercel origin, e.g. `https://zhol.vercel.app` (add any custom domain too).
 3. Render terminates HTTPS and proxies WebSockets automatically. Run exactly **one instance**: room state is serialized in-process.
+
+### Single service (no Vercel)
+
+Set `WEB_DIST_DIR=../web/dist`, build with `npm ci --include=dev && npm run build`, and set `ALLOWED_ORIGINS` to the service's own URL. The server then serves the game, the API and the `/room/:code` invite fallback from one origin. A production web build without `VITE_SERVER_URL` connects to its own origin.
 
 ### Backend on a VPS
 

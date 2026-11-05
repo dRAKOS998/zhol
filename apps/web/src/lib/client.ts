@@ -25,9 +25,11 @@ export interface ClientSnapshot {
   reclaimError: ProtocolError | null;
 }
 
+// VITE_SERVER_URL wins. Otherwise: dev talks to :3001 on the same host; a production build assumes the
+// server also serves the web app (same origin).
 const SERVER_URL: string =
   (import.meta.env.VITE_SERVER_URL as string | undefined)?.replace(/\/$/, '') ||
-  `${window.location.protocol}//${window.location.hostname}:3001`;
+  (import.meta.env.DEV ? `${window.location.protocol}//${window.location.hostname}:3001` : window.location.origin);
 
 const tokenKey = (code: string) => `zhol.session.${code}`;
 export const NAME_KEY = 'zhol.nickname';

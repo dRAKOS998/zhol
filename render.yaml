@@ -6,7 +6,7 @@ services:
     runtime: node
     plan: starter # persistent disks require a paid instance
     region: frankfurt
-    buildCommand: npm ci && npm run build -w @zhol/server
+    buildCommand: npm ci --include=dev && npm run build
     startCommand: npm start
     healthCheckPath: /health
     autoDeploy: true
@@ -19,6 +19,9 @@ services:
         value: /var/data/zhol.db
       - key: TRUST_PROXY
         value: "true"
+      # Optional: also serve the web app from this service (one URL, no Vercel needed).
+      - key: WEB_DIST_DIR
+        value: ../web/dist
       - key: ALLOWED_ORIGINS
         sync: false # e.g. https://zhol.vercel.app
       - key: PUBLIC_WEB_URL
