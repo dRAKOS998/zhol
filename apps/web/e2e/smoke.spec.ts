@@ -29,13 +29,30 @@ async function newPlayer(browser: Browser, mobile = false): Promise<{ ctx: Brows
 
 const rackSlot = (page: Page, tile: string) => page.locator(`[data-tile="${tile}"]`).getAttribute('data-slot');
 
-async function findPage(pages: Page[], button: string) {
+/** The page where `selector` is visible (e.g. whose turn it is). */
+async function findPage(pages: Page[], selector: string) {
   for (let i = 0; i < 40; i++) {
-    for (const p of pages) if (await p.getByRole('button', { name: button, exact: true }).isVisible()) return p;
+    for (const p of pages) if (await p.locator(selector).first().isVisible()) return p;
     await pages[0]!.waitForTimeout(150);
   }
-  throw new Error(`No page shows "${button}"`);
+  throw new Error(`No page shows "${selector}"`);
 }
+
+/** Drag a rack tile with the mouse and let go over `target` (my pile to throw, the stock to close). */
+async function dragTileTo(page: Page, tile: string, target: string) {
+  const from = (await page.locator(`.rack [data-tile="${tile}"]`).boundingBox())!;
+  const to = (await page.locator(target).boundingBox())!;
+  const sx = from.x + from.width / 2;
+  const sy = from.y + from.height / 2;
+  const tx = to.x + to.width / 2;
+  const ty = to.y + to.height / 2;
+  await page.mouse.move(sx, sy);
+  await page.mouse.down();
+  for (let k = 1; k <= 12; k++) await page.mouse.move(sx + ((tx - sx) * k) / 12, sy + ((ty - sy) * k) / 12);
+  await page.mouse.up();
+}
+const MY_PILE = '[data-drop="discard"] .pile-stack';
+const STOCK = '.stock.can-close';
 
 test('four isolated players play a round in real time', async ({ browser }) => {
   const players = [await newPlayer(browser), await newPlayer(browser), await newPlayer(browser), await newPlayer(browser, true)];
@@ -90,7 +107,7 @@ test('four isolated players play a round in real time', async ({ browser }) => {
   await expect(d.getByRole('group', { name: 'Rafti yt' })).toBeInViewport();
 
   const all = [a, b, c, d];
-  const starter = await findPage(all, 'Mbyll raundin');
+  const starter = await findPage(all, '.pile.can-drop');
   await starter.screenshot({ path: 'test-results/table-desktop-starter.png' });
   await d.screenshot({ path: 'test-results/table-360.png' });
 
@@ -127,23 +144,24 @@ test('four isolated players play a round in real time', async ({ browser }) => {
   await kb.reload();
   await expect(kb.locator(`[data-tile="${kbTile}"]`)).toHaveAttribute('data-slot', String((kbFrom + 12) % 24));
 
-  // Starter: ordinary discard of r12a
-  await starter.locator('[data-tile="r12a"]').click();
-  await starter.getByRole('button', { name: /^Hidh 12 e kuqe/ }).click();
-  await expect(starter.locator('[data-tile]')).toHaveCount(14);
+  // Starter: ordinary discard of r12a, dragged onto their own pile
+  await dragTileTo(starter, 'r12a', MY_PILE);
+  await expect(starter.locator('.rack [data-tile]')).toHaveCount(14);
+  await expect(starter.locator('[data-anchor] [data-tile-id="r12a"]')).toBeVisible();
 
-  // Next seat: draw from the stock (gets k08b), try an invalid close, then a valid one
-  const next = await findPage(all, 'Tërhiq një gur');
-  await next.getByRole('button', { name: 'Tërhiq një gur', exact: true }).click();
+  // Next seat: draw by tapping the stock (gets k08b), try an invalid close, then a valid one
+  const next = await findPage(all, 'button.stock-btn:not(.stock-close)');
+  await next.getByRole('button', { name: /^Tërhiq një gur nga stoku/ }).click();
   await expect(next.locator('[data-tile="k08b"]')).toBeVisible();
+  // Invalid close by tap: select k05b, then tap the stock
   await next.locator('[data-tile="k05b"]').click();
-  await next.getByRole('button', { name: 'Mbyll raundin' }).click();
-  await next.getByRole('button', { name: /Konfirmo mbylljen/ }).click();
+  await next.getByRole('button', { name: /Mbyll raundin duke vendosur 5 e zezë mbi stok/ }).click();
   await expect(next.getByRole('alert')).toContainText('14 gurët');
-  await expect(next.locator('[data-tile="k05b"]')).toHaveAttribute('aria-pressed', 'true');
-  await expect(next.locator('[data-tile]')).toHaveCount(15);
-  await next.locator('[data-tile="y13b"]').click();
-  await next.getByRole('button', { name: /Konfirmo mbylljen duke hedhur 13 e verdhë/ }).click();
+  // Refused: the tile is back on the rack, nothing was thrown
+  await expect(next.locator('.rack [data-tile="k05b"]:not(.is-leaving)')).toBeVisible();
+  await expect(next.locator('.rack [data-tile]')).toHaveCount(15);
+  // Valid close: drag the final tile (13 yellow) onto the stock
+  await dragTileTo(next, 'y13b', STOCK);
 
   // Every screen opens the scoreboard automatically with identical totals
   const totals: string[] = [];

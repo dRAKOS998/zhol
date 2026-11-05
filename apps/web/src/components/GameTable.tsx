@@ -1,9 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
-import { RACK_SLOTS, type RackEntry, compareTileIds, parseTile } from '@zhol/engine';
+import type { RackEntry } from '@zhol/engine';
 import type { DrawSource, PlayerView, ProtocolError, PublicSeat, PublicState } from '@zhol/protocol';
 import { client, type ConnectionStatus } from '../lib/client';
 import { errorText, formatScore, tileLabel } from '../lib/i18n';
-import { FlightLayer, type FlightRequest, anchorRect, tileBoxIn, useFlights } from './Flights';
+import { FlightLayer, type FlightRequest, anchorRect, reducedMotion, tileBoxIn, useFlights } from './Flights';
 import { Modal } from './Modal';
 import { Rack } from './Rack';
 import { Rules } from './Rules';
@@ -19,42 +19,6 @@ const CORNER: Record<Position | 'me', string> = { right: 'tr', top: 'tl', left: 
 
 /** Where opponents sit for each table size, in clockwise order after me. */
 const LAYOUT: Record<number, Position[]> = { 2: ['top'], 3: ['right', 'left'], 4: ['right', 'top', 'left'] };
-
-/** Lay out tiles with a blank slot between groups when they fit. */
-function layoutGroups(groups: string[][]): RackEntry[] {
-  const withGaps = groups.flatMap((g, i) => (i ? [null, ...g] : g));
-  const seq = withGaps.length <= RACK_SLOTS ? withGaps : groups.flat();
-  const out: RackEntry[] = [];
-  seq.forEach((id, slot) => id && out.push({ id, slot }));
-  return out;
-}
-
-function sortByColor(ids: string[]): RackEntry[] {
-  const groups = new Map<string, string[]>();
-  for (const id of [...ids].sort(compareTileIds)) {
-    const t = parseTile(id);
-    const key = t.kind === 'zhol' ? 'zhol' : t.color;
-    groups.set(key, [...(groups.get(key) ?? []), id]);
-  }
-  return layoutGroups([...groups.values()]);
-}
-
-function sortByNumber(ids: string[]): RackEntry[] {
-  const groups = new Map<number, string[]>();
-  const sorted = [...ids].sort((a, b) => {
-    const ta = parseTile(a);
-    const tb = parseTile(b);
-    const ra = ta.kind === 'zhol' ? 99 : ta.rank;
-    const rb = tb.kind === 'zhol' ? 99 : tb.rank;
-    return ra - rb || compareTileIds(a, b);
-  });
-  for (const id of sorted) {
-    const t = parseTile(id);
-    const key = t.kind === 'zhol' ? 99 : t.rank;
-    groups.set(key, [...(groups.get(key) ?? []), id]);
-  }
-  return layoutGroups([...groups.values()]);
-}
 
 function BotIcon() {
   return (
@@ -93,6 +57,40 @@ function Confetti() {
   );
 }
 
+type DropKind = 'discard' | 'close';
+interface Parked {
+  id: string;
+  kind: DropKind;
+  from: DOMRect;
+  to: DOMRect;
+  confirmed: boolean;
+}
+
+/** A thrown tile settling from where it was let go onto its target, and staying there until the server answers. */
+function ParkedTile({ parked }: { parked: Parked }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const { from, to } = parked;
+    const k = from.width / Math.max(1, to.width);
+    const anim = el.animate(
+      [
+        { transform: `translate(${from.left}px, ${from.top}px) scale(${k}) rotate(-6deg)` },
+        { transform: `translate(${to.left}px, ${to.top}px) scale(1.06) rotate(2deg)`, offset: 0.75 },
+        { transform: `translate(${to.left}px, ${to.top}px) scale(1) rotate(0deg)` },
+      ],
+      { duration: reducedMotion() ? 0 : 230, easing: 'cubic-bezier(.2,.8,.3,1)', fill: 'forwards' },
+    );
+    return () => anim.cancel();
+  }, [parked]);
+  return (
+    <div ref={ref} className={`parked-tile ${parked.kind === 'close' ? 'is-closing' : ''}`} style={{ width: parked.to.width }} aria-hidden="true">
+      <TileFace id={parked.id} size="rack" />
+    </div>
+  );
+}
+
 interface Props {
   view: PlayerView;
   rack: RackEntry[];
@@ -112,13 +110,11 @@ export function GameTable({ view, rack, status }: Props) {
   const name = (seat: number) => s.seats[seat]?.name ?? `Vendi ${seat + 1}`;
 
   const [selected, setSelected] = useState<string | null>(null);
-  const [closeMode, setCloseMode] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ text: string; tone: 'error' | 'info' } | null>(null);
   const [scoreOpen, setScoreOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
   const { flights, launch, done } = useFlights();
-  const discardFrom = useRef<DOMRect | null>(null);
 
   const inDeal = s.phase === 'AWAITING_DRAW' || s.phase === 'AWAITING_DISCARD';
   const myTurn = inDeal && s.activeSeat === me;
@@ -132,14 +128,18 @@ export function GameTable({ view, rack, status }: Props) {
   useEffect(() => {
     if (selected && !rack.some((e) => e.id === selected)) setSelected(null);
   }, [rack, selected]);
+  const blocked = s.lastEvent?.type === 'deal_blocked' && s.lastEvent.dealId === s.dealId && s.turnId === 1;
   useEffect(() => {
-    setCloseMode(false);
-    setMessage(null);
+    setMessage(blocked ? { text: 'Stoku mbaroi pa mbyllje: gurët u ndanë sërish.', tone: 'info' } : null);
     setScoreOpen(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [s.dealId]);
+  // Messages float over the table for a few seconds, then go.
   useEffect(() => {
-    if (!canDiscard) setCloseMode(false);
-  }, [canDiscard]);
+    if (!message) return;
+    const t = setTimeout(() => setMessage(null), message.tone === 'error' ? 4500 : 3200);
+    return () => clearTimeout(t);
+  }, [message]);
 
   // Open the scoreboard for every newly scored round, after the table has had a moment to celebrate.
   const seenResults = useRef(showResult ? s.results.length - 1 : s.results.length);
@@ -186,12 +186,18 @@ export function GameTable({ view, rack, status }: Props) {
           const shown = ev.source === 'previous_discard' ? b.seats[prevOf(ev.seat)]!.discardTop : null;
           if (from && to) reqs.push({ from, to: tileBoxIn(to, from.width * 0.7), tile: shown, arc: -50 });
         }
-      } else if (ev.type === 'discarded') {
+      } else if (ev.type === 'discarded' && ev.seat !== me) {
+        // My own throws are already lying on the pile (see `parked`); only opponents' tiles fly.
         const to = anchorRect(`pile-${ev.seat}`);
-        const from = ev.seat === me ? (discardFrom.current ?? anchorRect('rack')) : anchorRect(`opp-${ev.seat}`);
-        if (from && to) reqs.push({ from: ev.seat === me ? from : tileBoxIn(from, to.width * 0.6), to, tile: ev.tileId, arc: -80, duration: 480 });
-        discardFrom.current = null;
+        const from = anchorRect(`opp-${ev.seat}`);
+        if (from && to) reqs.push({ from: tileBoxIn(from, to.width * 0.6), to, tile: ev.tileId, arc: -80, duration: 480 });
       }
+    }
+    // The server has answered a throw of mine: the real pile (or the result) now shows the tile.
+    if (parkedRef.current?.confirmed) {
+      parkedRef.current = null;
+      setParked(null);
+      setLeaving(null);
     }
     launch(reqs);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -209,29 +215,44 @@ export function GameTable({ view, rack, status }: Props) {
     return ack;
   };
 
-  /** Tile on its way to the pile: hidden on the rack until the server confirms (or refuses). */
+  /** Tile I've thrown: hidden on the rack and lying where it was dropped until the server answers. */
   const [leaving, setLeaving] = useState<string | null>(null);
-  const rememberTile = (id: string) => {
-    const el = document.querySelector(`.rack [data-tile="${id}"]`);
-    discardFrom.current = el ? el.getBoundingClientRect() : null;
-  };
+  const [parked, setParked] = useState<Parked | null>(null);
+  const parkedRef = useRef<Parked | null>(null);
   const draw = (source: DrawSource) => !busy && canDraw && run(() => client.draw(source));
-  const throwTile = (id: string, from?: DOMRect) => {
+  /** Throw a tile onto my pile ('discard') or onto the stock to close the round ('close'). */
+  const throwTile = (kind: DropKind, id: string, from?: DOMRect) => {
     if (busy || !canDiscard) return;
-    if (from) discardFrom.current = from;
-    else rememberTile(id);
+    const rackEl = document.querySelector(`.rack [data-tile="${id}"] .tile`);
+    const start = from ?? rackEl?.getBoundingClientRect();
+    const target = kind === 'discard' ? document.querySelector(`[data-anchor="pile-${me}"] .tile`) : document.querySelector('[data-anchor="stock"] .stack-1');
+    const end = target?.getBoundingClientRect();
+    const p: Parked = { id, kind, from: start ?? end!, to: end ?? start!, confirmed: false };
+    if (start || end) {
+      parkedRef.current = p;
+      setParked(p);
+    }
     setLeaving(id);
-    const closing = closeMode;
-    void run(
-      () => (closing ? client.declareWin(id) : client.discard(id)),
-      () => {
-        setSelected(null);
-        if (closing) setCloseMode(false);
-      },
-    ).finally(() => setLeaving(null));
+    setSelected(null);
+    void run(() => (kind === 'close' ? client.declareWin(id) : client.discard(id))).then((ack) => {
+      if (ack.ok && parkedRef.current === p) {
+        // Keep it lying there until the new table state arrives (it follows the answer).
+        p.confirmed = true;
+        setTimeout(() => {
+          if (parkedRef.current === p) {
+            parkedRef.current = null;
+            setParked(null);
+            setLeaving(null);
+          }
+        }, 2500);
+      } else {
+        // Refused (e.g. the rest isn't all linked): the tile goes back to the rack.
+        parkedRef.current = null;
+        setParked(null);
+        setLeaving(null);
+      }
+    });
   };
-  const discard = () => selected && throwTile(selected);
-  const confirmClose = () => selected && throwTile(selected);
   const canThrow = canDiscard && !busy;
   const setReady = (ready: boolean) => run(() => client.setReady(ready));
 
@@ -239,20 +260,16 @@ export function GameTable({ view, rack, status }: Props) {
   const readyCount = players.filter((p) => s.seats[p]!.ready).length;
   const activeSeat = s.activeSeat !== null ? s.seats[s.activeSeat] : null;
 
+  // Read out for screen readers; the table itself shows whose turn it is.
   let statusText: string;
   if (s.phase === 'TOURNAMENT_COMPLETE') statusText = `Turneu përfundoi. ${winnersText(s) ?? ''}`;
   else if (s.phase === 'ROUND_RESULT') statusText = `Raundi ${s.roundNumber} u mbyll. Gati për raundin tjetër: ${readyCount}/${n}.`;
   else if (canDraw) statusText = prevTop ? `Tërhiq një gur ose merr gurin që hodhi ${name(prevSeat)}.` : 'Tërhiq një gur nga stoku.';
   else if (canDiscard)
-    statusText = closeMode
-      ? 'Zgjidh gurin e fundit që do hedhësh, pastaj konfirmo mbylljen.'
-      : rack.length === 15 && s.seats.every((x) => x.discardCount === 0)
-        ? 'Ti fillon me 15 gurë: zgjidh një gur dhe hidhe, ose mbyll raundin.'
-        : 'Zgjidh një gur dhe hidhe, ose mbyll raundin.';
+    statusText = 'Hidh një gur te hedhjet e tua, ose mbyll raundin duke vendosur gurin e fundit mbi stok.';
   else if (activeSeat && !activeSeat.connected) statusText = `${name(activeSeat.seat)} po rilidhet… Radha e pret.`;
   else statusText = activeSeat ? `Po luan ${name(activeSeat.seat)}${activeSeat.bot ? ' (bot)' : ''}…` : '';
 
-  const blocked = s.lastEvent?.type === 'deal_blocked' && s.lastEvent.dealId === s.dealId && s.turnId === 1;
   const justDiscarded = s.lastEvent?.type === 'discarded' ? s.lastEvent.seat : null;
 
   const deltaChip = (seat: number) =>
@@ -323,7 +340,7 @@ export function GameTable({ view, rack, status }: Props) {
     const mine = seat === me;
     const label = `Hedhjet e ${seat === me ? 'tua' : name(seat)}`;
     const content = p.discardTop ? (
-      <TileFace key={p.discardTop} id={p.discardTop} size="table" className={justDiscarded === seat ? 'is-landing' : ''} />
+      <TileFace key={p.discardTop} id={p.discardTop} size="table" className={justDiscarded === seat && seat !== me ? 'is-landing' : ''} />
     ) : (
       <span className="tile tile-table tile-empty" aria-hidden="true" />
     );
@@ -331,7 +348,7 @@ export function GameTable({ view, rack, status }: Props) {
     return (
       <div
         key={`pile-${seat}`}
-        className={`pile pile-${corner} ${seat === prevSeat ? 'pile-prev' : ''} ${mine && canThrow ? 'can-drop' : ''} ${mine && closeMode ? 'is-closing' : ''}`}
+        className={`pile pile-${corner} ${seat === prevSeat ? 'pile-prev' : ''} ${mine && canThrow ? 'can-drop' : ''}`}
         data-drop={mine && canThrow ? 'discard' : undefined}
       >
         <div className="pile-stack" data-anchor={`pile-${seat}`}>
@@ -346,8 +363,8 @@ export function GameTable({ view, rack, status }: Props) {
             <button
               type="button"
               className="pile-throw"
-              onClick={() => throwTile(selected)}
-              aria-label={`Hedhjet e tua: ${closeMode ? 'mbyll raundin duke hedhur' : 'hidh'} këtu ${tileLabel(selected)}`}
+              onClick={() => throwTile('discard', selected)}
+              aria-label={`Hedhjet e tua: hidh këtu ${tileLabel(selected)}`}
             >
               {content}
             </button>
@@ -358,7 +375,7 @@ export function GameTable({ view, rack, status }: Props) {
           )}
           {mine && canThrow && (
             <span className="drop-hint" aria-hidden="true">
-              {closeMode ? 'Mbyll këtu' : 'Hidh këtu'}
+              Hidh këtu
             </span>
           )}
         </div>
@@ -447,8 +464,12 @@ export function GameTable({ view, rack, status }: Props) {
               </div>
             ) : (
               <>
-                <div className="stock">
-                  {canDraw ? (
+                <div className={`stock ${canThrow ? 'can-close' : ''}`} data-drop={canThrow ? 'close' : undefined}>
+                  {canThrow && selected ? (
+                    <button type="button" className="stock-btn stock-close" data-anchor="stock" onClick={() => throwTile('close', selected)} aria-label={`Mbyll raundin duke vendosur ${tileLabel(selected)} mbi stok`}>
+                      {stockStack}
+                    </button>
+                  ) : canDraw ? (
                     <button type="button" className="stock-btn" data-anchor="stock" onClick={() => draw('stock')} disabled={busy || s.stockCount === 0} aria-label={`Tërhiq një gur nga stoku. Mbeten ${s.stockCount}.`}>
                       {stockStack}
                     </button>
@@ -458,6 +479,11 @@ export function GameTable({ view, rack, status }: Props) {
                     </div>
                   )}
                   <span className="center-label">Stoku</span>
+                  {canThrow && (
+                    <span className="drop-hint close-hint" aria-hidden="true">
+                      Mbyll këtu
+                    </span>
+                  )}
                 </div>
               </>
             )}
@@ -482,58 +508,14 @@ export function GameTable({ view, rack, status }: Props) {
         </div>
       </section>
 
-      <section className="controls" aria-label="Veprimet">
-        <p className={`status ${myTurn ? 'status-turn' : ''}`} aria-live="polite">
-          {blocked && <span className="status-note">Dora e mëparshme u bllokua: stoku mbaroi pa mbyllje. Gurët u ndanë sërish. </span>}
-          {statusText}
+      <p className="sr-only" aria-live="polite">
+        {statusText}
+      </p>
+      {message && (
+        <p key={message.text} className={`toast ${message.tone === 'info' ? 'toast-info' : ''}`} role="alert" onClick={() => setMessage(null)}>
+          {message.text}
         </p>
-        {message && (
-          <p className={`alert ${message.tone === 'info' ? 'alert-info' : ''}`} role="alert">
-            {message.text}
-          </p>
-        )}
-        <div className="action-row">
-          {canDraw && (
-            <>
-              <button type="button" className="btn btn-primary btn-shine" onClick={() => draw('stock')} disabled={busy}>
-                Tërhiq një gur
-              </button>
-              <button type="button" className="btn btn-secondary" onClick={() => draw('previous_discard')} disabled={busy || !prevTop}>
-                Merr gurin e hedhur
-              </button>
-            </>
-          )}
-          {canDiscard && !closeMode && (
-            <>
-              <button type="button" className="btn btn-primary" onClick={discard} disabled={busy || !selected}>
-                {selected ? `Hidh ${tileLabel(selected)}` : 'Hidh'}
-              </button>
-              <button
-                type="button"
-                className="btn btn-gold"
-                onClick={() => {
-                  setCloseMode(true);
-                  setMessage(null);
-                }}
-                disabled={busy}
-              >
-                Mbyll raundin
-              </button>
-            </>
-          )}
-          {canDiscard && closeMode && (
-            <>
-              <button type="button" className="btn btn-gold btn-shine" onClick={confirmClose} disabled={busy || !selected}>
-                {selected ? `Konfirmo mbylljen duke hedhur ${tileLabel(selected)}` : 'Zgjidh gurin për ta hedhur'}
-              </button>
-              <button type="button" className="btn btn-ghost" onClick={() => setCloseMode(false)}>
-                Anulo
-              </button>
-            </>
-          )}
-          {!myTurn && inDeal && <span className="muted small">Mund ta rendisësh raftin edhe kur s’është radha jote.</span>}
-        </div>
-      </section>
+      )}
 
       <section className="rack-area" aria-label="Rafti">
         <div data-anchor="rack">
@@ -544,23 +526,15 @@ export function GameTable({ view, rack, status }: Props) {
             onLayout={(l) => void client.sortRack(l)}
             dealKey={s.dealId}
             animateDeal={s.turnId === 1}
-            closeMode={closeMode}
-            canDropDiscard={canThrow}
-            onDropDiscard={throwTile}
+            canDrop={canThrow}
+            onDrop={(kind, id, rect) => throwTile(kind, id, rect)}
             hiddenTile={leaving}
           />
-        </div>
-        <div className="sort-row">
-          <button type="button" className="btn btn-small btn-ghost" onClick={() => void client.sortRack(sortByColor(rack.map((e) => e.id)))} disabled={!rack.length}>
-            Rendit sipas ngjyrës
-          </button>
-          <button type="button" className="btn btn-small btn-ghost" onClick={() => void client.sortRack(sortByNumber(rack.map((e) => e.id)))} disabled={!rack.length}>
-            Rendit sipas numrit
-          </button>
         </div>
       </section>
 
       <FlightLayer flights={flights} onDone={done} />
+      {parked && <ParkedTile key={parked.id} parked={parked} />}
 
       <Modal open={scoreOpen} title={s.phase === 'TOURNAMENT_COMPLETE' ? 'Rezultati përfundimtar' : 'Tabela e pikëve'} onClose={() => setScoreOpen(false)} wide>
         <ScoreTable state={s} mySeat={me} />
