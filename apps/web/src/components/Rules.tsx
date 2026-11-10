@@ -36,7 +36,16 @@ export function Rules() {
         mbetur ndahen të gjithë në vargje dhe grupe. Shtatë çifte nuk mbyllin. Një hedhje e zakonshme nuk e mbyll kurrë
         raundin vetvetiu.
       </p>
-      <h3>Pikët</h3>
+      <h3>Dy mënyra loje</h3>
+      <ul>
+        <li>
+          <strong>Zhol Klasik:</strong> luhen aq raunde sa ka lojtarë dhe pikët mblidhen. Fiton kush ka më pak pikë në fund.
+        </li>
+        <li>
+          <strong>Zhol i Shpejtë:</strong> luhet vetëm një raund, pa pikë. Fiton kush mbyll i pari.
+        </li>
+      </ul>
+      <h3>Pikët (Zhol Klasik)</h3>
       <ul>
         <li>Kush mbyll merr −20 pikë.</li>
         <li>Kush mbyll duke hedhur një gur Zhol merr −40. Zhol-i i përdorur brenda lidhjeve nuk jep bonus.</li>

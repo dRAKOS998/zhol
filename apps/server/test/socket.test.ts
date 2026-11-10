@@ -64,6 +64,22 @@ describe('rooms and seating', () => {
     expect(JSON.stringify(view)).not.toContain(ack.data.sessionToken);
   });
 
+  it('creates Zhol Klasik by default and Zhol i Shpejtë on request', async () => {
+    const { url } = await setup();
+    const a = new Player(url);
+    const b = new Player(url);
+    clients.push(a, b);
+    await Promise.all([a.connected(), b.connected()]);
+    expect(await a.call('create_room', { requestId: rid(), nickname: 'Klasik' })).toMatchObject({ ok: true });
+    const klasik = await a.until((v) => v.state.seats[0]!.name === 'Klasik');
+    expect(klasik.state.mode).toBe('klasik');
+    expect(await b.call('create_room', { requestId: rid(), nickname: 'Shpejt', mode: 'shpejte' })).toMatchObject({ ok: true });
+    const quick = await b.until((v) => v.state.seats[0]!.name === 'Shpejt');
+    expect(quick.state.mode).toBe('shpejte');
+    expect(quick.state.totalRounds).toBe(1);
+    expect(await a.call('create_room', { requestId: rid(), nickname: 'Ok', mode: 'turbo' })).toMatchObject({ ok: false, error: { code: 'INVALID_PAYLOAD' } });
+  });
+
   it('validates payloads and reports actionable errors', async () => {
     const { url } = await setup();
     const p = new Player(url);

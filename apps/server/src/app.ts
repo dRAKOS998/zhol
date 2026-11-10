@@ -320,11 +320,11 @@ export function createZholServer({ config, rng = secureRng, botDelayMs = DEFAULT
           return broadcast(cached.code);
         }
         if (!createLimiter.take(socket.data.ip)) return safeAck(ack, fail('RATE_LIMITED', 'Too many rooms created; try again in a minute'));
-        const { room, seat, token } = rooms.createRoom(p.data.nickname);
+        const { room, seat, token } = rooms.createRoom(p.data.nickname, p.data.mode);
         const result = joinedAck(room.code, seat, token, false);
         entryCache.set(`create:${p.data.requestId}`, { ack: result, code: room.code, seat });
         bind(socket, room.code, seat);
-        log(config, 'room_created', { code: room.code });
+        log(config, 'room_created', { code: room.code, mode: room.game.mode });
         safeAck(ack, result);
         broadcast(room.code);
       }),

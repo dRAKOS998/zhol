@@ -22,6 +22,12 @@ export const ZHOL_WIN_SCORE = -40;
 export type Phase = 'LOBBY' | 'AWAITING_DRAW' | 'AWAITING_DISCARD' | 'ROUND_RESULT' | 'TOURNAMENT_COMPLETE';
 export type DrawSource = 'stock' | 'previous_discard';
 export type FinishType = 'normal' | 'zhol';
+/**
+ * How a table plays. `klasik` (Zhol Klasik): one round per player, points add up, lowest total wins.
+ * `shpejte` (Zhol i Shpejtë): a single round, no points, whoever closes it wins.
+ */
+export type GameMode = 'klasik' | 'shpejte';
+export const GAME_MODES: readonly GameMode[] = ['klasik', 'shpejte'];
 
 export interface RackEntry {
   id: TileId;
@@ -104,6 +110,8 @@ export interface GameState {
   gameNumber?: number;
   /** Tournaments won per seat over the whole series (joint winners each count). Absent before one completes. */
   seriesWins?: number[];
+  /** Absent in states saved before game modes existed (those are all Zhol Klasik). */
+  mode?: GameMode;
 }
 
 export type EngineErrorCode =
@@ -170,8 +178,13 @@ export function playersOf(state: Pick<GameState, 'players'>): number[] {
   return state.players ?? ALL_SEATS;
 }
 
-/** Rounds in this tournament: one per player, so everyone starts once. */
-export function roundCountOf(state: Pick<GameState, 'players' | 'seated' | 'phase'>): number {
+export const modeOf = (state: Pick<GameState, 'mode'>): GameMode => state.mode ?? 'klasik';
+/** Points count only in Zhol Klasik; Zhol i Shpejtë is decided by who closes. */
+export const isScored = (state: Pick<GameState, 'mode'>) => modeOf(state) === 'klasik';
+
+/** Rounds in this tournament: one per player in Zhol Klasik, so everyone starts once; one in Zhol i Shpejtë. */
+export function roundCountOf(state: Pick<GameState, 'players' | 'seated' | 'phase' | 'mode'>): number {
+  if (modeOf(state) === 'shpejte') return 1;
   if (state.players) return state.players.length;
   if (state.phase === 'LOBBY') return Math.max(MIN_PLAYERS, state.seated.filter(Boolean).length);
   return ROUND_COUNT;
@@ -183,8 +196,9 @@ export const nextSeat = (seat: number, players: readonly number[] = ALL_SEATS) =
 export const previousSeat = (seat: number, players: readonly number[] = ALL_SEATS) =>
   players[(players.indexOf(seat) + players.length - 1) % players.length]!;
 
-export function createGame(config: Partial<GameConfig> = {}): GameState {
+export function createGame(config: Partial<GameConfig> = {}, mode: GameMode = 'klasik'): GameState {
   return {
+    mode,
     schema: 1,
     phase: 'LOBBY',
     seated: [false, false, false, false],
@@ -207,6 +221,15 @@ const revealed = (ev: HandEvaluation): RevealedHand => ({ links: ev.links.map((l
 
 export function totalsOf(state: Pick<GameState, 'results'>): number[] {
   return state.results.at(-1)?.totals.slice() ?? [0, 0, 0, 0];
+}
+
+/** Who won a finished game: the lowest total in Zhol Klasik, the player who closed in Zhol i Shpejtë. */
+export function gameWinners(state: Pick<GameState, 'mode' | 'results' | 'players'>): number[] {
+  if (!isScored(state)) {
+    const last = state.results.at(-1);
+    return last ? [last.winner] : [];
+  }
+  return tournamentWinners(totalsOf(state), playersOf(state));
 }
 
 /** Seats (among `players`) sharing the lowest cumulative total. */
@@ -466,14 +489,15 @@ export function applyAction(state: GameState, seat: number, action: GameAction, 
       const penalties = [0, 0, 0, 0];
       const deltas = [0, 0, 0, 0];
       const hands: (RevealedHand | null)[] = [null, null, null, null];
+      const scored = isScored(next);
       for (const s of playersOf(next)) {
         if (s === seat) {
-          deltas[s] = finishType === 'zhol' ? ZHOL_WIN_SCORE : WIN_SCORE;
+          if (scored) deltas[s] = finishType === 'zhol' ? ZHOL_WIN_SCORE : WIN_SCORE;
           hands[s] = revealed(check.evaluation!);
         } else {
           const evaluation: HandEvaluation = evaluateHand(rackIds(deal, s), next.config);
           penalties[s] = evaluation.penalty;
-          deltas[s] = evaluation.penalty;
+          if (scored) deltas[s] = evaluation.penalty;
           hands[s] = revealed(evaluation);
         }
       }
@@ -493,9 +517,9 @@ export function applyAction(state: GameState, seat: number, action: GameAction, 
       next.results.push(result);
       next.ready = [false, false, false, false];
       events.push({ type: 'round_scored', result });
-      if (next.results.length >= playersOf(next).length) {
+      if (next.results.length >= roundCountOf(next)) {
         next.phase = 'TOURNAMENT_COMPLETE';
-        const winners = tournamentWinners(totals, playersOf(next));
+        const winners = gameWinners(next);
         next.seriesWins = seriesWinsOf(next);
         for (const w of winners) next.seriesWins[w]! += 1;
         events.push({ type: 'tournament_complete', winners, totals });

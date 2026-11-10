@@ -1,5 +1,6 @@
 import {
   type DealPlan,
+  type GameMode,
   type GameState,
   type Rng,
   type TileId,
@@ -38,8 +39,8 @@ export function rigPlan(racks: TileId[][], opts: { stockTop?: TileId[]; stockBot
 }
 
 /** A game with four seated players. */
-export function seatedGame(): GameState {
-  let s = createGame();
+export function seatedGame(mode: GameMode = 'klasik'): GameState {
+  let s = createGame({}, mode);
   for (let i = 0; i < 4; i++) {
     const r = seatPlayer(s, i);
     if (!r.ok) throw new Error(r.code);
@@ -49,10 +50,10 @@ export function seatedGame(): GameState {
 }
 
 /** Ready everyone with an optional queue of rigged plans; returns the dealt state. */
-export function startGame(plans: DealPlan[] = [], rng: Rng = createSeededRng(1)) {
+export function startGame(plans: DealPlan[] = [], rng: Rng = createSeededRng(1), mode: GameMode = 'klasik') {
   const queue = [...plans];
   const ctx = { rng, takeDealPlan: () => queue.shift() };
-  let s = seatedGame();
+  let s = seatedGame(mode);
   for (let i = 0; i < 4; i++) s = must(applyAction(s, i, { type: 'ready', ready: true }, ctx)).state;
   return { state: s, ctx, queue };
 }

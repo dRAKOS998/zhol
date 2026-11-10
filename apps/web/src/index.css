@@ -2528,6 +2528,346 @@ body {
   }
 }
 
+/* ------------------------------------------------------------------ main menu: game modes */
+/* The two modes are two giant ivory tiles on the felt. Picking one presses it into the felt. */
+.mode-menu {
+  display: grid;
+  gap: 0.8rem;
+}
+.mode-menu-title {
+  margin: 0;
+  font-family: var(--font-slab);
+  font-weight: 700;
+  font-size: 1.6rem;
+  animation: rise-in 0.55s var(--spring) both 0.2s;
+}
+.mode-picker {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: clamp(0.8rem, 4vw, 1.25rem);
+  perspective: 900px;
+}
+.mode-tile {
+  --rx: 0deg;
+  --ry: 0deg;
+  --lift: 0px;
+  --ink: var(--ink-black);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  touch-action: manipulation;
+  animation: mode-deal 0.75s var(--spring) both var(--d, 0.25s);
+}
+.mode-shpejte {
+  --ink: var(--ink-zhol);
+}
+.mode-tile:focus-visible {
+  outline: none;
+}
+.mt-slab {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  aspect-ratio: 5 / 6;
+  border-radius: 12% / 10%;
+  background:
+    radial-gradient(110% 70% at 28% 12%, rgba(255, 255, 255, 0.95), transparent 55%),
+    linear-gradient(172deg, #fffaf0 0%, var(--ivory) 52%, #e9dab4 100%);
+  color: var(--ink);
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.95),
+    inset 0 -3px 3px rgba(150, 120, 60, 0.22),
+    0 2px 0 var(--side-1),
+    0 4px 0 var(--side-2),
+    0 6px 0 var(--side-3),
+    0 8px 0 var(--side-4),
+    0 10px 0 var(--side-5),
+    0 12px 4px rgba(0, 0, 0, 0.3),
+    0 20px 30px rgba(0, 0, 0, 0.35);
+  transform: translateY(var(--lift)) rotateX(var(--rx)) rotateY(var(--ry));
+  transform-style: preserve-3d;
+  transition:
+    transform 0.25s var(--spring),
+    box-shadow 0.25s ease,
+    filter 0.3s ease;
+}
+@media (hover: hover) {
+  .mode-tile:hover .mt-slab {
+    --lift: -6px;
+  }
+}
+.mode-tile:focus-visible .mt-slab {
+  box-shadow:
+    0 0 0 3px var(--focus),
+    0 2px 0 var(--side-1),
+    0 4px 0 var(--side-2),
+    0 6px 0 var(--side-3),
+    0 8px 0 var(--side-4),
+    0 10px 0 var(--side-5),
+    0 20px 30px rgba(0, 0, 0, 0.35);
+}
+/* picked: the tile sits down on the felt (less side showing) inside a brass halo */
+.mode-tile.is-on .mt-slab {
+  --lift: 6px;
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.95),
+    inset 0 -3px 3px rgba(150, 120, 60, 0.22),
+    0 2px 0 var(--side-2),
+    0 4px 0 var(--side-4),
+    0 0 0 4px var(--brass),
+    0 0 0 7px rgba(255, 217, 120, 0.25),
+    0 0 40px rgba(255, 217, 120, 0.45);
+  animation: mode-press 0.4s var(--spring);
+}
+.mode-picker.has-pick .mode-tile:not(.is-on) .mt-slab {
+  filter: saturate(0.6) brightness(0.78);
+}
+.mode-picker.has-pick .mode-tile:not(.is-on):hover .mt-slab {
+  filter: none;
+}
+.mt-check {
+  position: absolute;
+  top: -10px;
+  right: -10px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: linear-gradient(180deg, var(--brass-hi), var(--brass));
+  box-shadow:
+    0 3px 0 var(--brass-deep),
+    0 6px 10px rgba(0, 0, 0, 0.4);
+  animation: pop 0.35s var(--spring) both;
+}
+.mt-check::after {
+  content: '';
+  position: absolute;
+  left: 10px;
+  top: 6px;
+  width: 8px;
+  height: 14px;
+  border: solid #3a2504;
+  border-width: 0 3.5px 3.5px 0;
+  transform: rotate(42deg);
+}
+.mt-face {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  width: 100%;
+  height: 100%;
+}
+.mt-num {
+  font-family: var(--font-slab);
+  font-weight: 700;
+  font-size: clamp(4.5rem, 26vw, 7.5rem);
+  line-height: 0.85;
+  letter-spacing: -0.04em;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+/* Klasik: four round pips and a scrap of the score ledger */
+.mt-pips {
+  display: flex;
+  gap: 7px;
+  margin-top: 0.55rem;
+}
+.mt-pips i {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  transition: background 0.2s;
+}
+.mode-klasik.is-on .mt-pips i,
+.mode-klasik:hover .mt-pips i {
+  animation: pip-fill 0.3s ease both calc(var(--i) * 90ms);
+}
+.mt-ledger {
+  position: absolute;
+  bottom: 9%;
+  left: 12%;
+  right: 12%;
+  display: flex;
+  justify-content: space-between;
+  border-top: 1.5px dashed rgba(31, 26, 22, 0.25);
+  padding-top: 0.25rem;
+  font-family: var(--font-slab);
+  font-size: clamp(0.7rem, 3.2vw, 0.85rem);
+  color: rgba(31, 26, 22, 0.55);
+}
+/* I Shpejtë: a single 1 struck by the joker's bolt, with speed streaks */
+.mt-bolt {
+  position: absolute;
+  width: 46%;
+  height: auto;
+  right: 6%;
+  top: 8%;
+  color: var(--ink-yellow);
+  filter: drop-shadow(0 2px 0 rgba(138, 28, 102, 0.55));
+  transform: rotate(12deg);
+}
+.mode-shpejte:hover .mt-bolt,
+.mode-shpejte.is-on .mt-bolt {
+  animation: bolt-strike 0.5s ease both;
+}
+.mt-streaks {
+  position: absolute;
+  left: 10%;
+  bottom: 16%;
+  display: grid;
+  gap: 5px;
+}
+.mt-streaks i {
+  display: block;
+  height: 3px;
+  border-radius: 3px;
+  background: currentColor;
+  opacity: 0.35;
+}
+.mt-streaks i:nth-child(1) {
+  width: 34px;
+}
+.mt-streaks i:nth-child(2) {
+  width: 22px;
+  margin-left: 8px;
+}
+.mt-streaks i:nth-child(3) {
+  width: 28px;
+}
+.mode-shpejte:hover .mt-streaks i,
+.mode-shpejte.is-on .mt-streaks i {
+  animation: streak 0.6s ease-out infinite;
+}
+.mode-shpejte .mt-streaks i:nth-child(2) {
+  animation-delay: 0.12s;
+}
+.mode-shpejte .mt-streaks i:nth-child(3) {
+  animation-delay: 0.24s;
+}
+.mt-name {
+  margin-top: 0.85rem;
+  font-family: var(--font-slab);
+  font-weight: 700;
+  font-size: clamp(1.15rem, 5vw, 1.4rem);
+  line-height: 1.1;
+}
+.mode-tile.is-on .mt-name {
+  color: var(--brass-hi);
+}
+.mt-rule {
+  font-size: 0.92rem;
+  line-height: 1.4;
+  color: var(--cream-dim);
+}
+.mode-prompt {
+  margin: 0;
+  color: var(--cream-dim);
+  animation: rise-in 0.55s ease both 0.6s;
+}
+.create-panel {
+  animation: unroll 0.5s var(--spring) both;
+  transform-origin: top center;
+}
+.create-shpejte {
+  border-color: rgba(176, 126, 0, 0.6);
+}
+@keyframes mode-deal {
+  from {
+    transform: translateY(70px) rotateX(35deg);
+    opacity: 0;
+  }
+}
+@keyframes mode-press {
+  40% {
+    transform: translateY(10px) scale(0.97);
+  }
+}
+@keyframes pip-fill {
+  to {
+    background: currentColor;
+  }
+}
+@keyframes bolt-strike {
+  0% {
+    transform: rotate(12deg) translate(30%, -40%) scale(0.6);
+    opacity: 0;
+  }
+  60% {
+    transform: rotate(8deg) scale(1.12);
+    opacity: 1;
+  }
+}
+@keyframes streak {
+  from {
+    transform: translateX(10px);
+    opacity: 0.5;
+  }
+  to {
+    transform: translateX(-14px);
+    opacity: 0;
+  }
+}
+@keyframes unroll {
+  from {
+    transform: translateY(-12px) scaleY(0.6);
+    opacity: 0;
+  }
+}
+
+/* lobby + table: which mode this room plays */
+.mode-badge {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0.6rem 0.8rem;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(232, 184, 74, 0.35);
+  font-size: 0.92rem;
+  line-height: 1.4;
+}
+.mode-badge b {
+  font-family: var(--font-slab);
+  font-size: 1.02rem;
+  color: var(--brass-hi);
+}
+.mode-badge-rule {
+  color: var(--cream-dim);
+}
+.mode-badge .icon {
+  margin-top: 0.15rem;
+  color: var(--brass-hi);
+}
+.mode-badge-pips {
+  display: flex;
+  gap: 3px;
+  margin-top: 0.4rem;
+}
+.mode-badge-pips i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--brass-hi);
+}
+.topbar-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.topbar-mode .icon {
+  color: var(--brass-hi);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -2536,7 +2876,8 @@ body {
     transition: none !important;
     scroll-behavior: auto !important;
   }
-  .rack {
-    transform: none;
+  .rack,
+  .mt-slab {
+    transform: none !important;
   }
 }

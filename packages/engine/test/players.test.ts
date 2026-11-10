@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  type GameMode,
   type GameState,
   applyAction,
   assertValidDealPlan,
@@ -25,10 +26,10 @@ function seat(state: GameState, seats: number[]): GameState {
 }
 
 /** Drive a whole tournament with bots in every seat. Returns the final state. */
-function playOut(seats: number[], seed: number): { state: GameState; turns: number } {
+export function playOut(seats: number[], seed: number, mode: GameMode = 'klasik'): { state: GameState; turns: number } {
   const rng = createSeededRng(seed);
   const ctx = { rng };
-  let s = seat(createGame(), seats);
+  let s = seat(createGame({}, mode), seats);
   for (const n of seats.slice(1)) {
     const r = applyAction(s, n, { type: 'ready', ready: true }, ctx);
     if (!r.ok) throw new Error(r.code);
