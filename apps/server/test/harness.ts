@@ -26,6 +26,8 @@ export function testConfig(databasePath: string, overrides: Partial<ServerConfig
     zholPenalty: 20,
     testHarness: true,
     logRequests: false,
+    turnSeconds: 0,
+    awaySeconds: 0,
     webDistDir: null,
     ...overrides,
   };
@@ -115,7 +117,7 @@ export class Player {
         }
         return false;
       };
-      const timer = setTimeout(() => reject(new Error('Timed out waiting for state')), timeoutMs);
+      const timer = setTimeout(() => reject(new Error(`Timed out waiting for state (phase ${this.view?.state.phase}, turn ${this.view?.state.turnId}, active ${this.view?.state.activeSeat})`)), timeoutMs);
       if (check()) return;
       const loop = () => {
         if (!check()) this.waiters.push(loop);

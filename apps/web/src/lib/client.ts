@@ -23,6 +23,8 @@ export interface ClientSnapshot {
   pendingRack: RackEntry[] | null;
   /** Set when an automatic seat reclaim failed and the player must join by name. */
   reclaimError: ProtocolError | null;
+  /** Local time (ms) at which the computer will move for the active player, or null when nobody is on the clock. */
+  turnDeadline: number | null;
 }
 
 // VITE_SERVER_URL wins. Otherwise: dev talks to :3001 on the same host; a production build assumes the
@@ -83,7 +85,7 @@ class ZholClient {
   private listeners = new Set<() => void>();
   private queue: Promise<unknown> = Promise.resolve();
   private sortSeq = 0;
-  private snap: ClientSnapshot = { status: 'connecting', roomCode: null, seat: null, view: null, pendingRack: null, reclaimError: null };
+  private snap: ClientSnapshot = { status: 'connecting', roomCode: null, seat: null, view: null, pendingRack: null, reclaimError: null, turnDeadline: null };
   private roundListeners = new Set<() => void>();
 
   constructor() {
@@ -103,7 +105,8 @@ class ZholClient {
     this.socket.on('state_update', (view) => {
       if (this.snap.roomCode && view.state.code !== this.snap.roomCode) return;
       const sameDeal = this.snap.view?.state.dealId === view.state.dealId;
-      this.set({ view, seat: view.you.seat, pendingRack: sameDeal ? this.snap.pendingRack : null });
+      const left = view.state.turnEndsInMs;
+      this.set({ view, seat: view.you.seat, pendingRack: sameDeal ? this.snap.pendingRack : null, turnDeadline: typeof left === 'number' ? Date.now() + left : null });
     });
     this.socket.on('round_result', () => this.roundListeners.forEach((l) => l()));
   }
@@ -161,14 +164,14 @@ class ZholClient {
 
   /** Enter a room page: reclaim a stored seat if we have one. Returns false when the player must join by name. */
   enterRoom(code: string): boolean {
-    if (this.snap.roomCode !== code) this.set({ roomCode: code, view: null, seat: null, pendingRack: null, reclaimError: null });
+    if (this.snap.roomCode !== code) this.set({ roomCode: code, view: null, seat: null, pendingRack: null, reclaimError: null, turnDeadline: null });
     if (!storageGet(tokenKey(code))) return false;
     if (this.socket.connected) void this.reclaim(code);
     return true;
   }
 
   leaveRoomView() {
-    this.set({ roomCode: null, view: null, seat: null, pendingRack: null, reclaimError: null });
+    this.set({ roomCode: null, view: null, seat: null, pendingRack: null, reclaimError: null, turnDeadline: null });
   }
 
   /** Take back this tab's seat after a 'replaced' notice. */
@@ -201,6 +204,11 @@ class ZholClient {
 
   setReady(ready: boolean) {
     return this.enqueue(() => this.emit('player_ready', { requestId: requestId(), ready }));
+  }
+
+  /** "I'm here": take my seat back after the computer played for me. */
+  playerBack() {
+    return this.enqueue(() => this.emit('player_back', { requestId: requestId() }));
   }
 
   addBot(seat?: number) {

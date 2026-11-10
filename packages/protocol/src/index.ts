@@ -9,13 +9,14 @@ import {
   type GameEvent,
   type Phase,
   type RackEntry,
+  type RevealedHand,
   type RoundResult,
   type TileId,
   RACK_SLOTS,
   isValidTileId,
 } from '@zhol/engine';
 
-export type { DrawSource, GameEvent, Phase, RackEntry, RoundResult, TileId };
+export type { DrawSource, GameEvent, Phase, RackEntry, RevealedHand, RoundResult, TileId };
 
 // ---------------------------------------------------------------------------
 // Limits & formats
@@ -78,6 +79,9 @@ export const removeBotPayload = z.object({ requestId: requestIdSchema, seat: sea
 /** Host only: deal now with everyone seated (2–4 players), once they are all ready. */
 export const startGamePayload = z.object({ requestId: requestIdSchema }).strict();
 
+/** "I'm here": take my seat back from the computer after it played for me. */
+export const playerBackPayload = z.object({ requestId: requestIdSchema }).strict();
+
 export const drawTilePayload = z
   .object({
     requestId: requestIdSchema,
@@ -110,6 +114,7 @@ export type PlayerReadyPayload = z.input<typeof playerReadyPayload>;
 export type AddBotPayload = z.input<typeof addBotPayload>;
 export type RemoveBotPayload = z.input<typeof removeBotPayload>;
 export type StartGamePayload = z.input<typeof startGamePayload>;
+export type PlayerBackPayload = z.input<typeof playerBackPayload>;
 export type DrawTilePayload = z.input<typeof drawTilePayload>;
 export type DiscardTilePayload = z.input<typeof discardTilePayload>;
 export type DeclareWinPayload = z.input<typeof declareWinPayload>;
@@ -163,6 +168,8 @@ export interface PublicSeat {
   /** Played by the computer. */
   bot: boolean;
   connected: boolean;
+  /** The computer is playing this human's turns because they left or ran out of time. */
+  away?: boolean;
   ready: boolean;
   rackCount: number;
   discardTop: TileId | null;
@@ -195,6 +202,15 @@ export interface PublicState {
   totals: number[];
   /** Set once the tournament is complete. */
   winners: number[] | null;
+  /** Tournaments played at this table, counting this one (2 and up after a rematch). */
+  gameNumber?: number;
+  /** Tournaments won per seat across rematches. */
+  seriesWins?: number[];
+  /**
+   * Milliseconds, counted from when this view was made, until the computer moves for the active
+   * player. Null when no limit applies (a bot's turn, no deal, or the limits are switched off).
+   */
+  turnEndsInMs?: number | null;
   lastEvent: GameEvent | null;
 }
 
@@ -222,6 +238,7 @@ export interface ClientToServerEvents {
   add_bot: (payload: AddBotPayload, ack: AckFn) => void;
   remove_bot: (payload: RemoveBotPayload, ack: AckFn) => void;
   start_game: (payload: StartGamePayload, ack: AckFn) => void;
+  player_back: (payload: PlayerBackPayload, ack: AckFn) => void;
   draw_tile: (payload: DrawTilePayload, ack: AckFn) => void;
   discard_tile: (payload: DiscardTilePayload, ack: AckFn) => void;
   sort_rack: (payload: SortRackPayload, ack: AckFn) => void;
@@ -242,6 +259,7 @@ export const CLIENT_EVENTS = [
   'add_bot',
   'remove_bot',
   'start_game',
+  'player_back',
   'draw_tile',
   'discard_tile',
   'sort_rack',

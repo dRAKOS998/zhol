@@ -33,7 +33,7 @@ export function RoomPage({ code }: { code: string }) {
     return view.state.phase === 'LOBBY' ? (
       <Lobby state={view.state} mySeat={view.you.seat} />
     ) : (
-      <GameTable view={view} rack={displayRack(snap)} status={snap.status} />
+      <GameTable view={view} rack={displayRack(snap)} status={snap.status} deadline={snap.turnDeadline} />
     );
   }
 

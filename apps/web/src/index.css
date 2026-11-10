@@ -525,9 +525,13 @@ body {
 }
 .seat-name {
   font-weight: 700;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .seat-you {
   color: var(--cream-dim);
@@ -722,6 +726,11 @@ body {
   flex-wrap: wrap;
   gap: 0.6rem;
   align-items: center;
+}
+.invite-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
 }
 .invite-link {
   font-family: var(--font-sans);
@@ -2167,7 +2176,304 @@ body {
   list-style: disc;
 }
 
+/* ------------------------------------------------------------------ revealed hands (score window) */
+.hands {
+  margin-top: 0.9rem;
+  padding-top: 0.75rem;
+  border-top: 2px solid #ddcfa9;
+}
+.hands-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.45rem;
+}
+.hands-title {
+  margin: 0;
+  font-family: var(--font-slab);
+  font-size: 1.15rem;
+}
+.hands-rounds {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 10px;
+  background: #e6d8b2;
+}
+.hands-rounds button {
+  min-width: 40px;
+  min-height: 34px;
+  padding: 0 0.5rem;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: #5b4f3c;
+  font-weight: 700;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.hands-rounds button.is-on {
+  background: #fffaf0;
+  color: var(--ink-black);
+  box-shadow: 0 1px 3px rgba(60, 40, 10, 0.3);
+}
+.hands-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.5rem;
+}
+.hand {
+  padding: 0.5rem 0.55rem 0.6rem;
+  border-radius: 12px;
+  background: #efe3c2;
+  box-shadow: inset 0 0 0 1px #ddcfa9;
+  animation: row-in 0.4s ease both;
+  animation-delay: calc(var(--i) * 70ms);
+  /* fourteen tiles and the gaps between their groups fit one line on a phone */
+  --table-tile: clamp(16px, calc((100vw - 140px) / 14), 30px);
+}
+.hand.is-winner {
+  background: #e3efd8;
+  box-shadow: inset 0 0 0 1px #9fc79a;
+}
+.hand-who {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+.hand-name {
+  font-weight: 700;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hand-delta {
+  flex: none;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #5b4f3c;
+  font-variant-numeric: tabular-nums;
+}
+.hand-delta.is-good {
+  color: #0b6b52;
+}
+.hand-delta.is-bad {
+  color: var(--danger-ink);
+}
+.hand-tiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 6px;
+  padding-bottom: 4px;
+}
+.hand-group {
+  display: inline-flex;
+  gap: 1px;
+  padding: 1.5px;
+  border-radius: 6px;
+}
+/* small, flat tiles: the deep side and long shadow of table tiles would crowd a tight row */
+.hand .tile {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 1px 0 var(--side-2),
+    0 2px 0 var(--side-4),
+    0 3px 3px rgba(60, 40, 10, 0.3);
+  transition: none;
+}
+.hand-loose {
+  background: rgba(192, 38, 28, 0.12);
+  box-shadow: inset 0 0 0 1.5px rgba(192, 38, 28, 0.7);
+}
+.hand-final {
+  margin-left: auto;
+  background: rgba(232, 184, 74, 0.3);
+  box-shadow: inset 0 0 0 1.5px var(--brass-deep);
+}
+.series {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.2rem 0.8rem;
+  margin: 0.6rem 0 0;
+  font-size: 0.9rem;
+  color: #5b4f3c;
+}
+.series-label {
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+}
+.series-item b {
+  color: var(--ink-black);
+  font-variant-numeric: tabular-nums;
+}
+/* in a long score window the buttons stay in reach */
+.modal-actions-sticky {
+  position: sticky;
+  bottom: -1rem;
+  margin: 0.75rem -1rem -1rem;
+  padding: 0.6rem 1rem 0.9rem;
+  background: linear-gradient(180deg, rgba(247, 238, 216, 0), var(--ivory) 30%);
+}
+
+/* ------------------------------------------------------------------ clock, away players, rematch */
+.plaque-clock {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  font-weight: 700;
+  color: var(--brass-hi);
+  font-variant-numeric: tabular-nums;
+}
+.plaque-clock.is-low {
+  color: var(--bad);
+  animation: clock-low 1s ease-in-out infinite;
+}
+@keyframes clock-low {
+  50% {
+    opacity: 0.55;
+  }
+}
+.plaque.is-away .avatar {
+  filter: grayscale(0.85) brightness(0.8);
+}
+.plaque.is-away .mini-rack {
+  opacity: 0.6;
+}
+.rack-area {
+  position: relative;
+}
+/* floats over the top edge of my rack, so the table never jumps when it comes and goes */
+.away-banner {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  z-index: 20;
+  transform: translate(-50%, -55%);
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: max-content;
+  max-width: calc(100% - 12px);
+  margin: 0;
+  padding: 0.35rem 0.4rem 0.35rem 0.9rem;
+  border-radius: 99px;
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: var(--ink-black);
+  background: linear-gradient(180deg, #fff3cf, #f6dfa0);
+  box-shadow:
+    0 3px 0 var(--brass-deep),
+    0 12px 28px rgba(0, 0, 0, 0.5);
+  animation: away-in 0.35s var(--spring) both;
+}
+@keyframes away-in {
+  from {
+    transform: translate(-50%, -20%) scale(0.8);
+    opacity: 0;
+  }
+}
+.away-banner .btn {
+  min-height: 36px;
+  padding: 0.2rem 0.85rem;
+  border-radius: 99px;
+}
+/* my tiles step back while the computer plays them */
+.rack-area.is-away .rack {
+  filter: saturate(0.55) brightness(0.8);
+}
+.topbar-game {
+  color: var(--brass-hi);
+}
+.btn-round {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  flex: none;
+  border-radius: 50%;
+  border: 2px solid rgba(244, 236, 215, 0.45);
+  background: rgba(3, 30, 24, 0.45);
+  color: var(--cream);
+  font-weight: 700;
+  font-size: 1.05rem;
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease;
+}
+.btn-round:hover {
+  border-color: var(--brass);
+  background: rgba(3, 30, 24, 0.7);
+}
+.result-kicker {
+  white-space: nowrap;
+}
+.result-score {
+  font-weight: 700;
+  font-size: 1.5rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--brass-hi);
+  animation: pop 0.5s var(--spring) both 0.3s;
+}
+.result-note {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--brass-hi);
+  font-weight: 700;
+}
+/* the stock's caption makes room for the "close here" hint instead of hiding under it */
+.is-dragging-tile .stock.can-close .center-label,
+.stock-close + .center-label {
+  visibility: hidden;
+}
+
 /* ------------------------------------------------------------------ small screens */
+/* phones: the full score table (four rounds and a total) fits without sideways scrolling */
+@media (max-width: 480px) {
+  /* after a rematch the game number takes the word's place, so the bar stays on one line */
+  .topbar-word {
+    display: none;
+  }
+  .score-table {
+    font-size: 0.9rem;
+  }
+  .score-table th,
+  .score-table td {
+    padding: 0.5rem 0.2rem;
+  }
+  .score-table tr.is-me th[scope='row'] {
+    padding-left: 0.45rem;
+  }
+  .score-table th[scope='row'] {
+    white-space: normal;
+    line-height: 1.2;
+  }
+  .score-name {
+    max-width: 5.6rem;
+  }
+  .score-bot {
+    display: none;
+  }
+  .score-table .badge {
+    display: block;
+    width: max-content;
+    margin: 0.15rem 0 0;
+  }
+  .score-total {
+    font-size: 0.98rem;
+  }
+  .score-mark {
+    font-size: 0.8em;
+  }
+}
 @media (max-width: 420px) {
   .felt {
     padding: 0.35rem;

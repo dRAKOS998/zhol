@@ -447,7 +447,8 @@ describe('reconnection and persistence', () => {
       expect(p.tournament?.winners).toEqual([0, 1, 2, 3]);
       expect(p.roundResults).toHaveLength(4);
     }
-    expect(await players[0]!.call('player_ready', { requestId: rid(), ready: true })).toMatchObject({ ok: false, error: { code: 'TOURNAMENT_COMPLETE' } });
+    const st = players[0]!.state;
+    expect(await players[0]!.call('draw_tile', { requestId: rid(), dealId: st.dealId, turnId: st.turnId, source: 'stock' })).toMatchObject({ ok: false, error: { code: 'TOURNAMENT_COMPLETE' } });
     expect(server.db.results(code)).toHaveLength(4);
   });
 });

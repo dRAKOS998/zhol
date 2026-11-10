@@ -45,6 +45,12 @@ export interface DealState {
   indicator: TileId;
 }
 
+/** A hand as scored: tile IDs per link (runs by rank, sets by color) and the tiles left unlinked. */
+export interface RevealedHand {
+  links: TileId[][];
+  unlinked: TileId[];
+}
+
 export interface RoundResult {
   roundNumber: number;
   dealId: string;
@@ -57,6 +63,11 @@ export interface RoundResult {
   deltas: number[];
   /** Cumulative totals after this round. */
   totals: number[];
+  /**
+   * Every player's hand as it was scored, shown to the table once the round is closed
+   * (null for seats not playing). Absent in results saved before hands were revealed.
+   */
+  hands?: (RevealedHand | null)[];
 }
 
 export type GameEvent =
@@ -89,6 +100,10 @@ export interface GameState {
   deal: DealState | null;
   lastEvent: GameEvent | null;
   config: GameConfig;
+  /** Tournaments played at this table, counting the current one. Absent (= 1) before the first rematch. */
+  gameNumber?: number;
+  /** Tournaments won per seat over the whole series (joint winners each count). Absent before one completes. */
+  seriesWins?: number[];
 }
 
 export type EngineErrorCode =
@@ -184,6 +199,11 @@ export function createGame(config: Partial<GameConfig> = {}): GameState {
     config: { ...DEFAULT_SOLVER_CONFIG, ...config },
   };
 }
+
+export const gameNumberOf = (state: Pick<GameState, 'gameNumber'>) => state.gameNumber ?? 1;
+export const seriesWinsOf = (state: Pick<GameState, 'seriesWins'>) => state.seriesWins?.slice() ?? [0, 0, 0, 0];
+
+const revealed = (ev: HandEvaluation): RevealedHand => ({ links: ev.links.map((l) => l.slots.map((x) => x.id)), unlinked: ev.unlinked.slice() });
 
 export function totalsOf(state: Pick<GameState, 'results'>): number[] {
   return state.results.at(-1)?.totals.slice() ?? [0, 0, 0, 0];
@@ -310,7 +330,8 @@ export function seatPlayer(state: GameState, seat: number): ApplyResult {
 export function applyAction(state: GameState, seat: number, action: GameAction, ctx: ApplyContext): ApplyResult {
   if (!Number.isInteger(seat) || seat < 0 || seat >= SEAT_COUNT) return fail('INVALID_SEAT');
   if (!state.seated[seat]) return fail('NOT_SEATED');
-  if (state.phase === 'TOURNAMENT_COMPLETE') return fail('TOURNAMENT_COMPLETE');
+  // A finished tournament only accepts "ready", which asks for a rematch.
+  if (state.phase === 'TOURNAMENT_COMPLETE' && action.type !== 'ready') return fail('TOURNAMENT_COMPLETE');
   const next = cloneState(state);
   const events: GameEvent[] = [];
   const done = (): ApplyResult => {
@@ -340,11 +361,23 @@ export function applyAction(state: GameState, seat: number, action: GameAction, 
   }
 
   if (action.type === 'ready') {
-    if (next.phase !== 'LOBBY' && next.phase !== 'ROUND_RESULT') return fail('WRONG_PHASE');
+    if (next.phase !== 'LOBBY' && next.phase !== 'ROUND_RESULT' && next.phase !== 'TOURNAMENT_COMPLETE') return fail('WRONG_PHASE');
+    if (next.phase !== 'LOBBY' && !playersOf(next).includes(seat)) return fail('NOT_SEATED');
     next.ready[seat] = action.ready;
     if (next.phase === 'LOBBY') {
       // A full table starts by itself once everyone is ready; smaller tables wait for the host's start.
       if (next.seated.every(Boolean) && next.ready.every(Boolean)) beginTournament();
+    } else if (next.phase === 'TOURNAMENT_COMPLETE') {
+      // Rematch: the same players start over from zero once they have all asked for it.
+      const players = playersOf(next);
+      if (players.every((p) => next.ready[p])) {
+        next.gameNumber = gameNumberOf(next) + 1;
+        next.results = [];
+        next.firstStarter = players[ctx.rng.int(players.length)]!;
+        next.roundNumber = 1;
+        next.blockedDeals = 0;
+        events.push(startDeal(next, starterForRound(next.firstStarter, 1, players), ctx));
+      }
     } else if (playersOf(next).every((p) => next.ready[p])) {
       next.roundNumber += 1;
       next.blockedDeals = 0;
@@ -432,13 +465,16 @@ export function applyAction(state: GameState, seat: number, action: GameAction, 
       const finishType: FinishType = isZhol(action.tileId) ? 'zhol' : 'normal';
       const penalties = [0, 0, 0, 0];
       const deltas = [0, 0, 0, 0];
+      const hands: (RevealedHand | null)[] = [null, null, null, null];
       for (const s of playersOf(next)) {
         if (s === seat) {
           deltas[s] = finishType === 'zhol' ? ZHOL_WIN_SCORE : WIN_SCORE;
+          hands[s] = revealed(check.evaluation!);
         } else {
           const evaluation: HandEvaluation = evaluateHand(rackIds(deal, s), next.config);
           penalties[s] = evaluation.penalty;
           deltas[s] = evaluation.penalty;
+          hands[s] = revealed(evaluation);
         }
       }
       const prev = totalsOf(next);
@@ -452,13 +488,17 @@ export function applyAction(state: GameState, seat: number, action: GameAction, 
         penalties,
         deltas,
         totals,
+        hands,
       };
       next.results.push(result);
       next.ready = [false, false, false, false];
       events.push({ type: 'round_scored', result });
       if (next.results.length >= playersOf(next).length) {
         next.phase = 'TOURNAMENT_COMPLETE';
-        events.push({ type: 'tournament_complete', winners: tournamentWinners(totals, playersOf(next)), totals });
+        const winners = tournamentWinners(totals, playersOf(next));
+        next.seriesWins = seriesWinsOf(next);
+        for (const w of winners) next.seriesWins[w]! += 1;
+        events.push({ type: 'tournament_complete', winners, totals });
       } else {
         next.phase = 'ROUND_RESULT';
       }

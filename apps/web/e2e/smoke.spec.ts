@@ -173,6 +173,14 @@ test('four isolated players play a round in real time', async ({ browser }) => {
   expect(new Set(totals).size).toBe(1);
   expect(totals[0]).toContain('−20');
   expect(totals[0]).toContain('+1');
+  // ...and shows every hand as it was scored: the starter's loose 1, and the tile that closed the round
+  for (const p of all) {
+    const hands = p.getByRole('dialog').locator('.hand');
+    await expect(hands).toHaveCount(4);
+    await expect(p.getByRole('dialog').locator('.hand-loose [data-tile-id="y01a"]')).toBeVisible();
+    await expect(p.getByRole('dialog').locator('.hand.is-winner .hand-final [data-tile-id="y13b"]')).toBeVisible();
+    await expect(p.getByRole('dialog').locator('.hand [data-tile-id]')).toHaveCount(4 * 14 + 1);
+  }
   await d.screenshot({ path: 'test-results/score-360.png' });
 
   // Dismiss with Escape and reopen from the permanent button

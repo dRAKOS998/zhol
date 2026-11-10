@@ -31,18 +31,17 @@ CREATE TABLE IF NOT EXISTS seats (
   created_at  INTEGER NOT NULL,
   PRIMARY KEY (room_code, seat)
 );
--- Immutable ledger: one row per scored round. The primary key makes double scoring impossible.
+-- Immutable ledger: one row per scored round of each tournament played in the room.
+-- The primary key makes double scoring impossible.
 CREATE TABLE IF NOT EXISTS round_results (
   room_code    TEXT NOT NULL REFERENCES rooms(code) ON DELETE CASCADE,
+  game_number  INTEGER NOT NULL DEFAULT 1,
   round_number INTEGER NOT NULL CHECK (round_number BETWEEN 1 AND 4),
   deal_id      TEXT NOT NULL,
   result_json  TEXT NOT NULL,
   created_at   INTEGER NOT NULL,
-  PRIMARY KEY (room_code, round_number)
+  PRIMARY KEY (room_code, game_number, round_number)
 );
-CREATE TRIGGER IF NOT EXISTS round_results_immutable
-  BEFORE UPDATE ON round_results
-  BEGIN SELECT RAISE(ABORT, 'round results are immutable'); END;
 -- Idempotency ledger for gameplay commands (no credentials stored here).
 CREATE TABLE IF NOT EXISTS requests (
   room_code     TEXT NOT NULL REFERENCES rooms(code) ON DELETE CASCADE,
@@ -55,6 +54,12 @@ CREATE TABLE IF NOT EXISTS requests (
 CREATE INDEX IF NOT EXISTS requests_created ON requests(created_at);
 CREATE INDEX IF NOT EXISTS rooms_updated ON rooms(updated_at);
 PRAGMA user_version = 1;
+`;
+
+const RESULTS_IMMUTABLE = `
+CREATE TRIGGER IF NOT EXISTS round_results_immutable
+  BEFORE UPDATE ON round_results
+  BEGIN SELECT RAISE(ABORT, 'round results are immutable'); END;
 `;
 
 export type Db = ReturnType<typeof openDatabase>;
@@ -72,6 +77,30 @@ export function openDatabase(file: string) {
   if (!cols.some((c) => c.name === 'bots_json')) {
     db.exec("ALTER TABLE rooms ADD COLUMN bots_json TEXT NOT NULL DEFAULT '[false,false,false,false]'");
   }
+  // Migration: rematches. A room can hold several tournaments, so the ledger key gains the game number.
+  // SQLite cannot change a primary key in place: rebuild the table, keeping every existing row as game 1.
+  const ledger = db.prepare<[], { name: string }>('PRAGMA table_info(round_results)').all();
+  if (!ledger.some((c) => c.name === 'game_number')) {
+    db.transaction(() => {
+      db.exec(`
+        DROP TRIGGER IF EXISTS round_results_immutable;
+        ALTER TABLE round_results RENAME TO round_results_v1;
+        CREATE TABLE round_results (
+          room_code    TEXT NOT NULL REFERENCES rooms(code) ON DELETE CASCADE,
+          game_number  INTEGER NOT NULL DEFAULT 1,
+          round_number INTEGER NOT NULL CHECK (round_number BETWEEN 1 AND 4),
+          deal_id      TEXT NOT NULL,
+          result_json  TEXT NOT NULL,
+          created_at   INTEGER NOT NULL,
+          PRIMARY KEY (room_code, game_number, round_number)
+        );
+        INSERT INTO round_results (room_code, game_number, round_number, deal_id, result_json, created_at)
+          SELECT room_code, 1, round_number, deal_id, result_json, created_at FROM round_results_v1;
+        DROP TABLE round_results_v1;
+      `);
+    })();
+  }
+  db.exec(RESULTS_IMMUTABLE);
 
   const q = {
     getRoom: db.prepare<[string], { code: string; version: number; names_json: string; bots_json: string; state_json: string; created_at: number; updated_at: number }>(
@@ -86,8 +115,8 @@ export function openDatabase(file: string) {
     ),
     insertSeat: db.prepare('INSERT INTO seats (room_code, seat, token_hash, created_at) VALUES (?, ?, ?, ?)'),
     getSeatHashes: db.prepare<[string], { seat: number; token_hash: string }>('SELECT seat, token_hash FROM seats WHERE room_code = ?'),
-    insertResult: db.prepare('INSERT INTO round_results (room_code, round_number, deal_id, result_json, created_at) VALUES (?, ?, ?, ?, ?)'),
-    getResults: db.prepare<[string], { result_json: string }>('SELECT result_json FROM round_results WHERE room_code = ? ORDER BY round_number'),
+    insertResult: db.prepare('INSERT INTO round_results (room_code, game_number, round_number, deal_id, result_json, created_at) VALUES (?, ?, ?, ?, ?, ?)'),
+    getResults: db.prepare<[string], { result_json: string }>('SELECT result_json FROM round_results WHERE room_code = ? ORDER BY game_number, round_number'),
     getRequest: db.prepare<[string, number, string], { response_json: string }>(
       'SELECT response_json FROM requests WHERE room_code = ? AND seat = ? AND request_id = ?',
     ),
@@ -141,8 +170,9 @@ export function openDatabase(file: string) {
     },
     insertSeat: (code: string, seat: number, tokenHash: string) => q.insertSeat.run(code, seat, tokenHash, Date.now()),
     seatHashes: (code: string) => q.getSeatHashes.all(code),
-    insertResult: (code: string, result: RoundResult) =>
-      q.insertResult.run(code, result.roundNumber, result.dealId, JSON.stringify(result), Date.now()),
+    insertResult: (code: string, gameNumber: number, result: RoundResult) =>
+      q.insertResult.run(code, gameNumber, result.roundNumber, result.dealId, JSON.stringify(result), Date.now()),
+    /** Every scored round in the room, across rematches, oldest first. */
     results: (code: string): RoundResult[] => q.getResults.all(code).map((r) => JSON.parse(r.result_json)),
     getRequest(code: string, seat: number, requestId: string): unknown | undefined {
       const row = q.getRequest.get(code, seat, requestId);

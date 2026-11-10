@@ -52,6 +52,16 @@ export function Rules() {
         ndahen sërish për të njëjtin raund, me të njëjtin lojtar që fillon, dhe pikët nuk ndryshojnë.
       </p>
       <p>Fillimi kalon një vend në drejtim të akrepave pas çdo raundi të mbyllur, kështu çdo lojtar fillon një herë.</p>
+      <h3>Kur dikush largohet</h3>
+      <p>
+        Tavolina nuk ngec. Nëse një lojtar humb lidhjen ose nuk luan brenda kohës, kompjuteri luan për të derisa të
+        kthehet. Kur të mbetet pak kohë, pranë emrit shfaqet një orë. Kush kthehet, shtyp «Jam këtu» ose thjesht luan vetë.
+      </p>
+      <h3>Pas turneut</h3>
+      <p>
+        Kur mbyllet një raund, në tabelën e pikëve shihen duart e të gjithëve: lidhjet dhe gurët që mbetën pa lidhje. Në
+        fund të turneut, shtypni «Luaj sërish» për një turne të ri me të njëjtët lojtarë; pikët nisin nga zeroja.
+      </p>
     </div>
   );
 }

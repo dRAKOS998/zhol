@@ -10,6 +10,10 @@ export interface ServerConfig {
   zholPenalty: number;
   testHarness: boolean;
   logRequests: boolean;
+  /** Seconds a connected player may take per move before the computer plays it. 0 = no limit. */
+  turnSeconds: number;
+  /** Seconds a disconnected player is waited for before the computer plays for them. 0 = wait forever. */
+  awaySeconds: number;
   /** Optional: built web app to serve from this process (single-service deploys). */
   webDistDir: string | null;
 }
@@ -36,6 +40,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
   if (!Number.isInteger(zholPenalty) || zholPenalty < 0 || zholPenalty > 100) {
     throw new Error('ZHOL_UNLINKED_PENALTY must be an integer between 0 and 100');
   }
+  const seconds = (name: string, fallback: number) => {
+    const n = Number(env[name] ?? fallback);
+    if (!Number.isInteger(n) || n < 0 || n > 3600) throw new Error(`${name} must be an integer between 0 and 3600`);
+    return n;
+  };
   const testHarness = parseBool(env.ZHOL_TEST_HARNESS);
   if (testHarness && env.NODE_ENV === 'production') {
     throw new Error('ZHOL_TEST_HARNESS must never be enabled when NODE_ENV=production');
@@ -53,6 +62,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     zholPenalty,
     testHarness,
     logRequests: env.LOG_LEVEL !== 'silent',
+    turnSeconds: seconds('ZHOL_TURN_SECONDS', 90),
+    awaySeconds: seconds('ZHOL_AWAY_SECONDS', 30),
     webDistDir: env.WEB_DIST_DIR ? path.resolve(env.WEB_DIST_DIR) : null,
   };
 }

@@ -61,6 +61,16 @@ export function Lobby({ state, mySeat }: { state: PublicState; mySeat: number })
     if (!ack.ok) setError(errorText(ack.error));
   };
 
+  /** Phones: hand the link to the system share sheet (WhatsApp, Viber, Messages…). */
+  const canShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function';
+  const share = async () => {
+    try {
+      await navigator.share({ title: 'Zhol', text: 'Eja luajmë Zhol!', url: link });
+    } catch {
+      /* closed without sharing */
+    }
+  };
+
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(link);
@@ -100,13 +110,15 @@ export function Lobby({ state, mySeat }: { state: PublicState; mySeat: number })
               {s.bot ? <BotIcon /> : <PersonIcon />}
             </span>
             <span className="seat-who">
-              <span className="seat-name">
-                {s.name}
-                {mine && <span className="seat-you"> (ti)</span>}
-              </span>
+              <span className="seat-name">{s.name}</span>
               <span className="seat-state">
-                {s.seat === state.host && !s.bot ? 'Pritësi · ' : ''}
-                {s.bot ? 'Bot · gati' : !s.connected ? 'Jo i lidhur' : s.ready ? 'Gati' : 'Jo ende gati'}
+                {/* The host starts the game, which readies them: "not ready yet" would only confuse. */}
+                {s.bot
+                  ? 'Bot · gati'
+                  : [mine ? 'Ti' : '', s.seat === state.host ? 'pritësi' : '', !s.connected ? 'jo i lidhur' : s.seat === state.host ? '' : s.ready ? 'gati' : 'jo ende gati']
+                      .filter(Boolean)
+                      .join(' · ')
+                      .replace(/^./, (c) => c.toLocaleUpperCase('sq'))}
               </span>
             </span>
             {s.bot && isHost && (
@@ -196,9 +208,16 @@ export function Lobby({ state, mySeat }: { state: PublicState; mySeat: number })
           <code className="invite-link" aria-label="Lidhja e dhomës">
             {link}
           </code>
-          <button type="button" className="btn btn-secondary" onClick={copy}>
-            {copied === 'ok' ? 'U kopjua ✓' : 'Kopjo lidhjen'}
-          </button>
+          <div className="invite-actions">
+            {canShare && (
+              <button type="button" className="btn btn-primary" onClick={share}>
+                Dërgo lidhjen
+              </button>
+            )}
+            <button type="button" className="btn btn-secondary" onClick={copy}>
+              {copied === 'ok' ? 'U kopjua ✓' : 'Kopjo lidhjen'}
+            </button>
+          </div>
         </div>
         {copied === 'fail' && <p className="muted small">Kopjimi nuk u lejua nga shfletuesi. Zgjidhe lidhjen dhe kopjoje me dorë.</p>}
       </section>

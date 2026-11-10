@@ -7,10 +7,12 @@ import {
   createRandomDealPlan,
   createSeededRng,
   createTileSet,
+  isLegalLink,
   isZhol,
   nextSeat,
   previousSeat,
   rackIds,
+  tilePenalty,
   tournamentWinners,
 } from '../src/index.js';
 import {
@@ -295,8 +297,57 @@ describe('tournament', () => {
     // everyone won once with all-zero losers: four-way tie at −20
     expect(s.results[3]!.totals).toEqual([-20, -20, -20, -20]);
     expect(tournamentWinners(s.results[3]!.totals)).toEqual([0, 1, 2, 3]);
-    // no fifth round
-    expect(applyAction(s, 0, { type: 'ready', ready: true }, ctx)).toMatchObject({ code: 'TOURNAMENT_COMPLETE' });
+    // no fifth round: nothing but a request for a rematch is accepted
+    const d = s.deal!;
+    expect(applyAction(s, d.active, { type: 'draw', source: 'stock', dealId: d.dealId, turnId: d.turnId }, ctx)).toMatchObject({ code: 'TOURNAMENT_COMPLETE' });
+    expect(applyAction(s, 0, { type: 'start' }, ctx)).toMatchObject({ code: 'TOURNAMENT_COMPLETE' });
+    expect(s.seriesWins).toEqual([1, 1, 1, 1]);
+  });
+
+  it('starts a rematch from zero once every player asks for one', () => {
+    const played = playFour();
+    const { ctx } = played;
+    let s = played.s;
+    const finished = s.deal!.dealId;
+    for (let i = 0; i < 4; i++) {
+      expect(s.phase).toBe('TOURNAMENT_COMPLETE');
+      s = must(applyAction(s, i, { type: 'ready', ready: true }, ctx)).state;
+    }
+    expect(s.phase).toBe('AWAITING_DISCARD');
+    expect(s.gameNumber).toBe(2);
+    expect(s.roundNumber).toBe(1);
+    expect(s.results).toEqual([]);
+    expect(s.ready).toEqual([false, false, false, false]);
+    expect(s.deal!.dealId).not.toBe(finished);
+    expect(s.deal!.racks[s.deal!.starter]).toHaveLength(15);
+    expect(s.seriesWins).toEqual([1, 1, 1, 1]); // the series tally survives the rematch
+    expect(s.lastEvent).toMatchObject({ type: 'deal_started', roundNumber: 1 });
+  });
+
+  it('a player may take back a rematch request before the others answer', () => {
+    const played = playFour();
+    const { ctx } = played;
+    let s = played.s;
+    s = must(applyAction(s, 0, { type: 'ready', ready: true }, ctx)).state;
+    s = must(applyAction(s, 0, { type: 'ready', ready: false }, ctx)).state;
+    for (let i = 1; i < 4; i++) s = must(applyAction(s, i, { type: 'ready', ready: true }, ctx)).state;
+    expect(s.phase).toBe('TOURNAMENT_COMPLETE');
+  });
+
+  it("reveals every player's scored hand with the result", () => {
+    const { s } = playFour();
+    for (const r of s.results) {
+      expect(r.hands).toHaveLength(4);
+      for (let seat = 0; seat < 4; seat++) {
+        const hand = r.hands![seat]!;
+        expect(hand.links.flat().length + hand.unlinked.length).toBe(14);
+        expect(new Set([...hand.links.flat(), ...hand.unlinked]).size).toBe(14);
+        for (const link of hand.links) expect(isLegalLink(link)).toBe(true);
+        expect(hand.unlinked.reduce((sum, id) => sum + tilePenalty(id), 0)).toBe(r.penalties[seat]);
+        expect(hand.links.flat()).not.toContain(r.finalDiscard);
+      }
+      expect(r.hands![r.winner]!.unlinked).toEqual([]);
+    }
   });
 
   it('reports a single winner or joint winners', () => {

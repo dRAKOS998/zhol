@@ -47,6 +47,9 @@ npm run dev
 4. Everyone presses **Jam gati**. A full table of four deals by itself; with 2–3 players the host presses **Fillo lojën**. The host can also tap an empty seat to **Shto bot** (or **Mbush vendet me bot**) to play against the computer.
 5. The starter (chosen randomly) holds 15 tiles and only discards: tap a tile, then **Hidh**. The next player presses **Tërhiq një gur** (or takes the previous player's discard), then discards.
 6. To close, tap the tile you want to throw last, press **Mbyll raundin**, then confirm.
+7. When a round closes, the score window shows every player's hand: the links, and the loose tiles that cost points. After the last round, **Luaj sërish** starts a new tournament with the same players once everyone has pressed it (bots agree as soon as a person asks).
+
+A table never gets stuck on someone who left. A player who disconnects, or who does not move in time, is played by the computer until they come back; a clock appears next to the name for the last 30 seconds. Whoever returns presses **Jam këtu** or simply plays. Nothing is played while nobody at all is connected, so a room everyone has left waits as it is.
 
 To play from phones on the same Wi‑Fi, run `npm run dev`, open `http://<your-LAN-IP>:5173`, and add that origin to `ALLOWED_ORIGINS` in `apps/server/.env` (e.g. `ALLOWED_ORIGINS=http://localhost:5173,http://192.168.1.20:5173`).
 
@@ -72,6 +75,8 @@ Opening the same room in two tabs of the same profile hands the seat to the newe
 | `DATABASE_PATH` | `./data/zhol.db` | SQLite file; must be on persistent storage in production |
 | `TRUST_PROXY` | `false` | `true` behind nginx/Render so rate limits see the real client IP |
 | `ZHOL_UNLINKED_PENALTY` | `20` | House rule: penalty for an unlinked Zhol |
+| `ZHOL_TURN_SECONDS` | `90` | Time a connected player has per move before the computer plays it for them. `0` = no limit |
+| `ZHOL_AWAY_SECONDS` | `30` | How long a disconnected player is waited for before the computer plays for them. `0` = wait forever |
 | `WEB_DIST_DIR` | — | Serve the built web app from the server too (single-service deploy), e.g. `../web/dist` |
 | `NODE_ENV` | — | `production` in production |
 | `ZHOL_TEST_HARNESS` | — | Test-only deal rigging. Refuses to start unless `NODE_ENV=test`; never set in production |
@@ -143,6 +148,8 @@ sudo systemctl start zhol
 - **Engine** (`packages/engine`): `applyAction(state, seat, action, ctx)` is a pure reducer returning a new state or an error code. Phases: `LOBBY → AWAITING_DISCARD/AWAITING_DRAW → ROUND_RESULT → … → TOURNAMENT_COMPLETE`. Randomness is injected (`crypto.randomInt` in production, a seeded generator in tests). Deals use Fisher–Yates and a uniformly chosen numbered indicator; every deal asserts 57 + 1 + 48 = 106.
 - **Solver**: `evaluateHand` enumerates every legal run/set with physical tile IDs and wildcard assignments, then runs a memoized bitmask search over the lowest remaining tile (leave it unlinked, or place it in each fitting candidate). It returns the grouping, unlinked IDs, minimum penalty and full-cover flag, with a deterministic tie-break, and is the single source for both close validation and loser scoring. Tests compare it against an exhaustive reference on 600 random hands.
 - **Server**: commands are validated with zod, the acting seat comes from the socket binding (never the payload), and each mutation is one synchronous SQLite transaction (room state + immutable `round_results` row + idempotency record) committed before any broadcast. `(seat, requestId)` replays return the stored outcome; `dealId`/`turnId` reject stale commands; `sort_rack` never changes `turnId`. Seat credentials are 256-bit tokens stored only as SHA-256 hashes; invite links contain only the room code.
+- **Away players**: the server keeps one timer per room for whichever automatic move is due first: a bot's, or a human's whose time ran out (`RoomManager.autoJobs`). Who is connected and since when lives in memory only; after a restart everyone counts as just disconnected and gets the full wait. A seat the computer has played for is marked `away` and keeps moving after a short pause until its player sends any command, `player_back`, or reconnects.
+- **Rematch**: `ready` in `TOURNAMENT_COMPLETE` asks for one; when every player has asked, the engine clears the results, bumps `gameNumber` and deals round 1. `round_results` is keyed by `(room_code, game_number, round_number)`; databases from before rematches are migrated on startup, keeping their rows as game 1.
 - **Views**: each socket receives `{ you: { seat, rack }, state: PublicState }`. `PublicState` holds names, connectivity, readiness, active seat, phase, indicator, discard tops, stock count, rack counts and the full scored history — enough to rebuild the scoreboard after a reconnect.
 
 ## Rregullat (përmbledhje)
@@ -161,4 +168,6 @@ sudo systemctl start zhol
 
 **Dorë e bllokuar.** Kush tërheq gurin e fundit të stokut mund të mbyllë. Nëse vetëm hedh, dora bllokohet dhe gurët ndahen sërish për të njëjtin raund, me të njëjtin fillues; pikët nuk ndryshojnë.
 
-**Fituesi.** Luhen aq raunde sa ka lojtarë (2–4). Në fund fiton kush ka më pak pikë. Nëse disa ndajnë rezultatin më të ulët, fitojnë bashkë.
+**Fituesi.** Luhen aq raunde sa ka lojtarë (2–4). Në fund fiton kush ka më pak pikë. Nëse disa ndajnë rezultatin më të ulët, fitojnë bashkë. Me «Luaj sërish» të njëjtët lojtarë nisin një turne të ri nga zeroja.
+
+**Kur dikush largohet.** Nëse një lojtar humb lidhjen ose nuk luan brenda kohës, kompjuteri luan për të derisa të kthehet.

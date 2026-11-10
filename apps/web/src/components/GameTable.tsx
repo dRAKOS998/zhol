@@ -8,7 +8,7 @@ import { Modal } from './Modal';
 import { Rack, moveInLayout } from './Rack';
 import { createPortal } from 'react-dom';
 import { Rules } from './Rules';
-import { ScoreSummary, ScoreTable, winnersText } from './Scoreboard';
+import { RoundHands, ScoreSummary, ScoreTable, SeriesTally, winnersText } from './Scoreboard';
 import { TileBack, TileFace } from './Tile';
 
 type Position = 'left' | 'top' | 'right';
@@ -93,13 +93,39 @@ function ParkedTile({ parked }: { parked: Parked }) {
   );
 }
 
+/** Whole seconds left until `deadline` (local ms), ticking; null when there is no deadline. */
+function useSecondsLeft(deadline: number | null): number | null {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (deadline === null) return;
+    setNow(Date.now());
+    const t = setInterval(() => setNow(Date.now()), 500);
+    return () => clearInterval(t);
+  }, [deadline]);
+  return deadline === null ? null : Math.max(0, Math.ceil((deadline - now) / 1000));
+}
+
+/** The clock only shows once time is running short. */
+const CLOCK_FROM = 30;
+
+function ClockIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="icon" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="13" r="8" />
+      <path d="M12 9v4l2.5 2M9 2h6" />
+    </svg>
+  );
+}
+
 interface Props {
   view: PlayerView;
   rack: RackEntry[];
   status: ConnectionStatus;
+  /** Local time (ms) when the computer moves for the active player; null when nobody is on the clock. */
+  deadline?: number | null;
 }
 
-export function GameTable({ view, rack, status }: Props) {
+export function GameTable({ view, rack, status, deadline = null }: Props) {
   const s = view.state;
   const me = view.you.seat;
   const players = s.players.length ? s.players : [0, 1, 2, 3];
@@ -125,6 +151,29 @@ export function GameTable({ view, rack, status }: Props) {
   const prevTop = s.seats[prevSeat]!.discardTop;
   const lastResult = s.results.at(-1) ?? null;
   const showResult = s.phase === 'ROUND_RESULT' || s.phase === 'TOURNAMENT_COMPLETE';
+  const over = s.phase === 'TOURNAMENT_COMPLETE';
+  // Servers from before rematches do not send a game number; there the button would do nothing.
+  const canRematch = over && s.gameNumber !== undefined;
+  const gameNumber = s.gameNumber ?? 1;
+  const secondsLeft = useSecondsLeft(inDeal ? deadline : null);
+  const iAmAway = !!s.seats[me]?.away;
+  // No countdown for a seat the computer is already playing: that pause is not the player's time.
+  const activeAway = s.activeSeat !== null && !!s.seats[s.activeSeat]?.away;
+  const clock = secondsLeft !== null && secondsLeft <= CLOCK_FROM && !activeAway ? secondsLeft : null;
+
+  // A hidden tab says so in its title when the table is waiting for me.
+  useEffect(() => {
+    const base = 'Zhol';
+    const set = () => {
+      document.title = document.hidden && myTurn ? `● Radha jote · ${base}` : base;
+    };
+    set();
+    document.addEventListener('visibilitychange', set);
+    return () => {
+      document.removeEventListener('visibilitychange', set);
+      document.title = base;
+    };
+  }, [myTurn]);
 
   // Drop a selection that is no longer on the rack (after a discard or a new deal).
   useEffect(() => {
@@ -146,6 +195,8 @@ export function GameTable({ view, rack, status }: Props) {
   // Open the scoreboard for every newly scored round, after the table has had a moment to celebrate.
   const seenResults = useRef(showResult ? s.results.length - 1 : s.results.length);
   useEffect(() => {
+    // A rematch starts the count again.
+    if (s.results.length < seenResults.current) seenResults.current = s.results.length;
     if (s.results.length > seenResults.current) {
       seenResults.current = s.results.length;
       const t = setTimeout(() => setScoreOpen(true), 1900);
@@ -365,10 +416,14 @@ export function GameTable({ view, rack, status }: Props) {
   const myReady = s.seats[me]!.ready;
   const readyCount = players.filter((p) => s.seats[p]!.ready).length;
   const activeSeat = s.activeSeat !== null ? s.seats[s.activeSeat] : null;
+  // Short enough for the narrow card in the middle of a phone's table.
+  const champions = !s.winners ? '' : s.winners.includes(me) && s.winners.length === 1 ? 'Fitove turneun!' : `${s.winners.length === 1 ? 'Fiton' : 'Fitojnë'} ${s.winners.map((w) => (w === me ? 'ti' : name(w))).join(', ')}!`;
+  const askers = over ? players.filter((p) => p !== me && s.seats[p]!.ready && !s.seats[p]!.bot).map(name) : [];
 
   // Read out for screen readers; the table itself shows whose turn it is.
   let statusText: string;
-  if (s.phase === 'TOURNAMENT_COMPLETE') statusText = `Turneu përfundoi. ${winnersText(s) ?? ''}`;
+  if (iAmAway) statusText = 'Kompjuteri po luan për ty. Shtyp «Jam këtu» për ta marrë lojën në dorë.';
+  else if (s.phase === 'TOURNAMENT_COMPLETE') statusText = `Turneu përfundoi. ${winnersText(s) ?? ''}`;
   else if (s.phase === 'ROUND_RESULT') statusText = `Raundi ${s.roundNumber} u mbyll. Gati për raundin tjetër: ${readyCount}/${n}.`;
   else if (canDraw) statusText = prevTop ? `Tërhiq një gur ose merr gurin që hodhi ${name(prevSeat)}.` : 'Tërhiq një gur nga stoku.';
   else if (canDiscard)
@@ -401,7 +456,7 @@ export function GameTable({ view, rack, status }: Props) {
     const active = inDeal && s.activeSeat === seat;
     const backs = Math.min(p.rackCount, 15);
     return (
-      <div key={seat} className={`plaque plaque-${pos} ${active ? 'is-active' : ''} ${p.bot ? 'is-bot' : ''}`} aria-current={active ? 'true' : undefined}>
+      <div key={seat} className={`plaque plaque-${pos} ${active ? 'is-active' : ''} ${p.bot ? 'is-bot' : ''} ${p.away || !p.connected ? 'is-away' : ''}`} aria-current={active ? 'true' : undefined}>
         <div className="plaque-card">
           <span className="avatar" aria-hidden="true">
             {p.bot ? <BotIcon /> : (p.name ?? '?').slice(0, 1).toLocaleUpperCase('sq')}
@@ -410,10 +465,17 @@ export function GameTable({ view, rack, status }: Props) {
           <span className="plaque-text">
             <span className="plaque-name">{p.name}</span>
             <span className="plaque-meta">
-              {!p.connected ? (
+              {p.away ? (
+                <span className="plaque-away">luan kompjuteri</span>
+              ) : !p.connected ? (
                 <span className="plaque-away">po rilidhet…</span>
-              ) : s.phase === 'ROUND_RESULT' ? (
-                p.ready ? 'gati' : 'pret'
+              ) : showResult ? (
+                p.ready ? 'gati' : over ? '' : 'pret'
+              ) : active && clock !== null ? (
+                <span className={`plaque-clock ${clock <= 10 ? 'is-low' : ''}`}>
+                  <ClockIcon />
+                  {clock} s
+                </span>
               ) : active ? (
                 <span className="thinking">
                   {p.bot ? 'mendon' : 'luan'}
@@ -513,11 +575,13 @@ export function GameTable({ view, rack, status }: Props) {
               <i key={i} className={i < s.results.length ? 'done' : i === s.results.length && inDeal ? 'now' : ''} />
             ))}
           </span>
-          Raundi {Math.max(1, s.roundNumber)}/{s.totalRounds}
+          {gameNumber > 1 && <span className="topbar-game">Loja {gameNumber} ·</span>}
+          <span className={gameNumber > 1 ? 'topbar-word' : ''}>Raundi </span>
+          {Math.max(1, s.roundNumber)}/{s.totalRounds}
         </span>
         <ScoreSummary state={s} mySeat={me} />
         <div className="topbar-actions">
-          <button type="button" className="btn btn-small btn-ghost" onClick={() => setRulesOpen(true)} aria-label="Rregullat">
+          <button type="button" className="btn-round" onClick={() => setRulesOpen(true)} aria-label="Rregullat">
             ?
           </button>
           <button type="button" className="btn btn-small btn-secondary" onClick={() => setScoreOpen(true)}>
@@ -550,13 +614,14 @@ export function GameTable({ view, rack, status }: Props) {
             {showResult ? (
               <div className="result-card" key={`res-${s.results.length}`}>
                 {s.phase === 'TOURNAMENT_COMPLETE' && <Confetti />}
-                <span className="result-kicker">{s.phase === 'TOURNAMENT_COMPLETE' ? 'Turneu mbaroi' : `Raundi ${lastResult?.roundNumber}`}</span>
+                <span className="result-kicker">{over ? 'Turneu mbaroi' : `Raundi ${lastResult?.roundNumber}`}</span>
                 <p className="result-line">
-                  {s.phase === 'TOURNAMENT_COMPLETE'
-                    ? winnersText(s)
+                  {over
+                    ? champions
                     : lastResult && `${lastResult.winner === me ? 'Ti e mbylle' : `${name(lastResult.winner)} e mbylli`} raundin${lastResult.finishType === 'zhol' ? ' me Zhol!' : '!'}`}
                 </p>
-                {lastResult && <TileFace id={lastResult.finalDiscard} size="table" className="result-tile" />}
+                {over && s.winners && <span className="result-score">{formatScore(s.totals[s.winners[0]!]!)} pikë</span>}
+                {lastResult && !over && <TileFace id={lastResult.finalDiscard} size="table" className="result-tile" />}
                 <div className="result-actions">
                   <button type="button" className="btn btn-small btn-secondary" onClick={() => setScoreOpen(true)}>
                     Shiko pikët
@@ -566,7 +631,17 @@ export function GameTable({ view, rack, status }: Props) {
                       {myReady ? `Gati ✓ (${readyCount}/${n})` : 'Jam gati'}
                     </button>
                   )}
+                  {canRematch && (
+                    <button type="button" className={`btn btn-small ${myReady ? 'btn-ghost' : 'btn-primary btn-shine'}`} aria-pressed={myReady} onClick={() => setReady(!myReady)}>
+                      {myReady ? `Po presim (${readyCount}/${n})` : 'Luaj sërish'}
+                    </button>
+                  )}
                 </div>
+                {canRematch && askers.length > 0 && !myReady && (
+                  <p className="result-note">
+                    {askers.join(', ')} {askers.length === 1 ? 'kërkon' : 'kërkojnë'} lojë të re.
+                  </p>
+                )}
               </div>
             ) : (
               <>
@@ -604,6 +679,12 @@ export function GameTable({ view, rack, status }: Props) {
               <span className="plaque-text">
                 <span className="plaque-name">{name(me)} (ti)</span>
                 <span className="plaque-meta">
+                  {myTurn && clock !== null && (
+                    <span className={`plaque-clock ${clock <= 10 ? 'is-low' : ''}`}>
+                      <ClockIcon />
+                      {clock} s
+                    </span>
+                  )}
                   <span className="plaque-score">{formatScore(s.totals[me]!)}</span>
                 </span>
               </span>
@@ -623,7 +704,15 @@ export function GameTable({ view, rack, status }: Props) {
         </p>
       )}
 
-      <section className="rack-area" aria-label="Rafti">
+      <section className={`rack-area ${iAmAway ? 'is-away' : ''}`} aria-label="Rafti">
+        {iAmAway && status === 'connected' && (
+          <p className="away-banner" role="status">
+            Kompjuteri po luan për ty.
+            <button type="button" className="btn btn-small btn-primary" onClick={() => void client.playerBack()}>
+              Jam këtu
+            </button>
+          </p>
+        )}
         <div data-anchor="rack">
           <Rack
             rack={rack}
@@ -652,7 +741,14 @@ export function GameTable({ view, rack, status }: Props) {
 
       <Modal open={scoreOpen} title={s.phase === 'TOURNAMENT_COMPLETE' ? 'Rezultati përfundimtar' : 'Tabela e pikëve'} onClose={() => setScoreOpen(false)} wide>
         <ScoreTable state={s} mySeat={me} />
-        <div className="modal-actions">
+        <SeriesTally state={s} />
+        <RoundHands state={s} mySeat={me} />
+        <div className="modal-actions modal-actions-sticky">
+          {canRematch && (
+            <button type="button" className={`btn ${myReady ? 'btn-ghost' : 'btn-primary'}`} aria-pressed={myReady} onClick={() => setReady(!myReady)} data-autofocus>
+              {myReady ? `Po presim të tjerët (${readyCount}/${n})` : 'Luaj sërish'}
+            </button>
+          )}
           {s.phase === 'ROUND_RESULT' && (
             <button type="button" className={`btn ${myReady ? 'btn-ghost' : 'btn-primary'}`} aria-pressed={myReady} onClick={() => setReady(!myReady)} data-autofocus>
               {myReady ? `Gati ✓ (${readyCount}/${n} gati)` : 'Jam gati'}
