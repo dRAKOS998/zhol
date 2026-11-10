@@ -8,6 +8,7 @@ import { Modal } from './Modal';
 import { Rack, moveInLayout } from './Rack';
 import { createPortal } from 'react-dom';
 import { Rules } from './Rules';
+import { BoltIcon } from './ModeArt';
 import { RoundHands, ScoreSummary, ScoreTable, SeriesTally, winnersText } from './Scoreboard';
 import { TileBack, TileFace } from './Tile';
 
@@ -152,6 +153,8 @@ export function GameTable({ view, rack, status, deadline = null }: Props) {
   const lastResult = s.results.at(-1) ?? null;
   const showResult = s.phase === 'ROUND_RESULT' || s.phase === 'TOURNAMENT_COMPLETE';
   const over = s.phase === 'TOURNAMENT_COMPLETE';
+  /** Zhol i Shpejtë: one round, no points, the closer wins. */
+  const quick = s.mode === 'shpejte';
   // Servers from before rematches do not send a game number; there the button would do nothing.
   const canRematch = over && s.gameNumber !== undefined;
   const gameNumber = s.gameNumber ?? 1;
@@ -417,13 +420,13 @@ export function GameTable({ view, rack, status, deadline = null }: Props) {
   const readyCount = players.filter((p) => s.seats[p]!.ready).length;
   const activeSeat = s.activeSeat !== null ? s.seats[s.activeSeat] : null;
   // Short enough for the narrow card in the middle of a phone's table.
-  const champions = !s.winners ? '' : s.winners.includes(me) && s.winners.length === 1 ? 'Fitove turneun!' : `${s.winners.length === 1 ? 'Fiton' : 'Fitojnë'} ${s.winners.map((w) => (w === me ? 'ti' : name(w))).join(', ')}!`;
+  const champions = !s.winners ? '' : s.winners.includes(me) && s.winners.length === 1 ? (quick ? 'Fitove!' : 'Fitove turneun!') : `${s.winners.length === 1 ? 'Fiton' : 'Fitojnë'} ${s.winners.map((w) => (w === me ? 'ti' : name(w))).join(', ')}!`;
   const askers = over ? players.filter((p) => p !== me && s.seats[p]!.ready && !s.seats[p]!.bot).map(name) : [];
 
   // Read out for screen readers; the table itself shows whose turn it is.
   let statusText: string;
   if (iAmAway) statusText = 'Kompjuteri po luan për ty. Shtyp «Jam këtu» për ta marrë lojën në dorë.';
-  else if (s.phase === 'TOURNAMENT_COMPLETE') statusText = `Turneu përfundoi. ${winnersText(s) ?? ''}`;
+  else if (s.phase === 'TOURNAMENT_COMPLETE') statusText = `${quick ? 'Loja' : 'Turneu'} përfundoi. ${winnersText(s) ?? ''}`;
   else if (s.phase === 'ROUND_RESULT') statusText = `Raundi ${s.roundNumber} u mbyll. Gati për raundin tjetër: ${readyCount}/${n}.`;
   else if (canDraw) statusText = prevTop ? `Tërhiq një gur ose merr gurin që hodhi ${name(prevSeat)}.` : 'Tërhiq një gur nga stoku.';
   else if (canDiscard)
@@ -434,7 +437,7 @@ export function GameTable({ view, rack, status, deadline = null }: Props) {
   const justDiscarded = s.lastEvent?.type === 'discarded' ? s.lastEvent.seat : null;
 
   const deltaChip = (seat: number) =>
-    showResult && lastResult ? (
+    showResult && lastResult && !quick ? (
       <span key={`d-${lastResult.roundNumber}`} className={`delta-chip ${lastResult.deltas[seat]! < 0 ? 'is-good' : lastResult.deltas[seat]! > 0 ? 'is-bad' : ''}`}>
         {formatScore(lastResult.deltas[seat]!)}
       </span>
@@ -486,7 +489,7 @@ export function GameTable({ view, rack, status, deadline = null }: Props) {
               ) : (
                 `${p.rackCount} gurë`
               )}
-              <span className="plaque-score">{formatScore(s.totals[seat]!)}</span>
+              {!quick && <span className="plaque-score">{formatScore(s.totals[seat]!)}</span>}
             </span>
           </span>
           {winnerMarks(seat)}
@@ -569,6 +572,13 @@ export function GameTable({ view, rack, status, deadline = null }: Props) {
         <span className="wordmark wordmark-xs" aria-label="Zhol">
           Zhol
         </span>
+        {quick ? (
+          <span className="topbar-round topbar-mode">
+            <BoltIcon />
+            {gameNumber > 1 && <span className="topbar-game">Loja {gameNumber} ·</span>}
+            <span>I Shpejtë</span>
+          </span>
+        ) : (
         <span className="topbar-round">
           <span className="round-pips" aria-hidden="true">
             {Array.from({ length: s.totalRounds }, (_, i) => (
@@ -579,13 +589,14 @@ export function GameTable({ view, rack, status, deadline = null }: Props) {
           <span className={gameNumber > 1 ? 'topbar-word' : ''}>Raundi </span>
           {Math.max(1, s.roundNumber)}/{s.totalRounds}
         </span>
-        <ScoreSummary state={s} mySeat={me} />
+        )}
+        {!quick && <ScoreSummary state={s} mySeat={me} />}
         <div className="topbar-actions">
           <button type="button" className="btn-round" onClick={() => setRulesOpen(true)} aria-label="Rregullat">
             ?
           </button>
           <button type="button" className="btn btn-small btn-secondary" onClick={() => setScoreOpen(true)}>
-            Tabela e pikëve
+            {quick ? 'Duart' : 'Tabela e pikëve'}
           </button>
         </div>
       </header>
@@ -614,17 +625,20 @@ export function GameTable({ view, rack, status, deadline = null }: Props) {
             {showResult ? (
               <div className="result-card" key={`res-${s.results.length}`}>
                 {s.phase === 'TOURNAMENT_COMPLETE' && <Confetti />}
-                <span className="result-kicker">{over ? 'Turneu mbaroi' : `Raundi ${lastResult?.roundNumber}`}</span>
+                <span className="result-kicker">{over ? (quick ? 'Zhol i Shpejtë' : 'Turneu mbaroi') : `Raundi ${lastResult?.roundNumber}`}</span>
                 <p className="result-line">
                   {over
                     ? champions
                     : lastResult && `${lastResult.winner === me ? 'Ti e mbylle' : `${name(lastResult.winner)} e mbylli`} raundin${lastResult.finishType === 'zhol' ? ' me Zhol!' : '!'}`}
                 </p>
-                {over && s.winners && <span className="result-score">{formatScore(s.totals[s.winners[0]!]!)} pikë</span>}
-                {lastResult && !over && <TileFace id={lastResult.finalDiscard} size="table" className="result-tile" />}
+                {over && s.winners && !quick && <span className="result-score">{formatScore(s.totals[s.winners[0]!]!)} pikë</span>}
+                {over && quick && lastResult && (
+                  <span className="result-score">{lastResult.finishType === 'zhol' ? 'Mbylli me Zhol' : 'Mbylli i pari'}</span>
+                )}
+                {lastResult && (!over || quick) && <TileFace id={lastResult.finalDiscard} size="table" className="result-tile" />}
                 <div className="result-actions">
                   <button type="button" className="btn btn-small btn-secondary" onClick={() => setScoreOpen(true)}>
-                    Shiko pikët
+                    {quick ? 'Shiko duart' : 'Shiko pikët'}
                   </button>
                   {s.phase === 'ROUND_RESULT' && (
                     <button type="button" className={`btn btn-small ${myReady ? 'btn-ghost' : 'btn-primary btn-shine'}`} aria-pressed={myReady} onClick={() => setReady(!myReady)}>
@@ -685,7 +699,7 @@ export function GameTable({ view, rack, status, deadline = null }: Props) {
                       {clock} s
                     </span>
                   )}
-                  <span className="plaque-score">{formatScore(s.totals[me]!)}</span>
+                  {!quick && <span className="plaque-score">{formatScore(s.totals[me]!)}</span>}
                 </span>
               </span>
               {winnerMarks(me)}
@@ -739,7 +753,7 @@ export function GameTable({ view, rack, status, deadline = null }: Props) {
           document.body,
         )}
 
-      <Modal open={scoreOpen} title={s.phase === 'TOURNAMENT_COMPLETE' ? 'Rezultati përfundimtar' : 'Tabela e pikëve'} onClose={() => setScoreOpen(false)} wide>
+      <Modal open={scoreOpen} title={quick ? 'Duart e lojës' : s.phase === 'TOURNAMENT_COMPLETE' ? 'Rezultati përfundimtar' : 'Tabela e pikëve'} onClose={() => setScoreOpen(false)} wide>
         <ScoreTable state={s} mySeat={me} />
         <SeriesTally state={s} />
         <RoundHands state={s} mySeat={me} />

@@ -8,6 +8,10 @@ const nameOf = (s: PublicState, seat: number) => s.seats[seat]?.name ?? `Vendi $
 export function winnersText(s: PublicState): string | null {
   if (!s.winners) return null;
   const names = s.winners.map((w) => nameOf(s, w));
+  if (s.mode === 'shpejte') {
+    const last = s.results.at(-1);
+    return `Fitues: ${names[0]}, mbylli${last?.finishType === 'zhol' ? ' duke hedhur Zhol' : ' i pari'}.`;
+  }
   if (names.length === 1) return `Fitues i turneut: ${names[0]} (${formatScore(s.totals[s.winners[0]!]!)})`;
   return `Fitues të përbashkët: ${names.join(', ')} (${formatScore(s.totals[s.winners[0]!]!)})`;
 }
@@ -18,6 +22,14 @@ const inGame = (state: PublicState) => state.seats.filter((x) => (state.players.
 export function ScoreTable({ state, mySeat }: { state: PublicState; mySeat: number | null }) {
   const rounds = Array.from({ length: state.totalRounds }, (_, i) => i + 1);
   const last = state.results.at(-1);
+  if (state.mode === 'shpejte') {
+    // One round, no points: who closed is the whole result.
+    return (
+      <div className="score">
+        <p className="score-headline">{winnersText(state) ?? 'Zhol i Shpejtë: një raund, pa pikë. Kush mbyll i pari, fiton.'}</p>
+      </div>
+    );
+  }
   return (
     <div className="score">
       {state.winners ? (
@@ -108,10 +120,11 @@ export function RoundHands({ state, mySeat }: { state: PublicState; mySeat: numb
   useEffect(() => setRound(latest), [latest, state.gameNumber]);
   const result: RoundResult | undefined = withHands.find((r) => r.roundNumber === round) ?? withHands.at(-1);
   if (!result?.hands) return null;
+  const quick = state.mode === 'shpejte';
   return (
     <section className="hands" aria-label={`Duart e raundit ${result.roundNumber}`}>
       <div className="hands-head">
-        <h3 className="hands-title">Duart e raundit {result.roundNumber}</h3>
+        <h3 className="hands-title">{quick ? 'Duart në fund të lojës' : `Duart e raundit ${result.roundNumber}`}</h3>
         {withHands.length > 1 && (
           <div className="hands-rounds" role="group" aria-label="Zgjidh raundin">
             {withHands.map((r) => (
@@ -136,7 +149,17 @@ export function RoundHands({ state, mySeat }: { state: PublicState; mySeat: numb
                   {seat.seat === mySeat && <span className="score-you"> (ti)</span>}
                 </span>
                 <span className={`hand-delta ${delta < 0 ? 'is-good' : delta > 0 ? 'is-bad' : ''}`}>
-                  {won ? `mbylli ${formatScore(delta)}` : hand.unlinked.length ? `${hand.unlinked.length} pa lidhje ${formatScore(delta)}` : 'të gjithë të lidhur 0'}
+                  {quick
+                    ? won
+                      ? 'fitoi'
+                      : hand.unlinked.length
+                        ? `${hand.unlinked.length} pa lidhje`
+                        : 'të gjithë të lidhur'
+                    : won
+                      ? `mbylli ${formatScore(delta)}`
+                      : hand.unlinked.length
+                        ? `${hand.unlinked.length} pa lidhje ${formatScore(delta)}`
+                        : 'të gjithë të lidhur 0'}
                 </span>
               </div>
               <div className="hand-tiles">
@@ -164,7 +187,9 @@ export function RoundHands({ state, mySeat }: { state: PublicState; mySeat: numb
           );
         })}
       </ul>
-      <p className="score-legend">Gurët me kornizë të kuqe mbetën pa lidhje dhe japin pikë. Guri i rrethuar me të artë mbylli raundin.</p>
+      <p className="score-legend">
+        {quick ? 'Gurët me kornizë të kuqe mbetën pa lidhje.' : 'Gurët me kornizë të kuqe mbetën pa lidhje dhe japin pikë.'} Guri i rrethuar me të artë mbylli raundin.
+      </p>
     </section>
   );
 }

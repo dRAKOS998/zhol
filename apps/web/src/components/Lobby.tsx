@@ -4,6 +4,7 @@ import { client } from '../lib/client';
 import { errorText } from '../lib/i18n';
 import { Modal } from './Modal';
 import { Rules } from './Rules';
+import { ModeBadge } from './ModeArt';
 import { TileBack, TileFace } from './Tile';
 
 function BotIcon() {
@@ -133,10 +134,11 @@ export function Lobby({ state, mySeat }: { state: PublicState; mySeat: number })
     );
   };
 
+  const quick = state.mode === 'shpejte';
   let hint: string;
   if (seated < state.minPlayers) hint = isHost ? 'Fto një shok me lidhjen ose shto një bot. Loja nis me 2 deri në 4 lojtarë.' : 'Duhet edhe të paktën një lojtar tjetër.';
   else if (isHost && humansWaiting.length) hint = `Po presim: ${humansWaiting.map((s) => s.name).join(', ')}.`;
-  else if (isHost) hint = `Gati për ${seated} lojtarë · ${seated} raunde.`;
+  else if (isHost) hint = quick ? `Gati për ${seated} lojtarë · një raund, kush mbyll fiton.` : `Gati për ${seated} lojtarë · ${seated} raunde.`;
   else hint = me.ready ? 'Pritësi do ta nisë lojën.' : 'Shtyp «Jam gati» kur të jesh gati.';
 
   return (
@@ -145,6 +147,7 @@ export function Lobby({ state, mySeat }: { state: PublicState; mySeat: number })
         <h1 className="wordmark wordmark-sm">Zhol</h1>
         <span className="room-chip">Dhoma {state.code}</span>
       </header>
+      <ModeBadge mode={state.mode} />
 
       <section className="lobby-table" aria-labelledby="seats-h">
         <h2 id="seats-h" className="sr-only">

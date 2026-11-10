@@ -3,6 +3,7 @@ import {
   type DealPlan,
   type GameAction,
   type GameEvent,
+  type GameMode,
   type GameState,
   type Rng,
   type TileId,
@@ -12,13 +13,14 @@ import {
   chooseBotMove,
   createGame,
   gameNumberOf,
+  gameWinners,
+  modeOf,
   playersOf,
   previousSeat,
   roundCountOf,
   seatPlayer,
   seriesWinsOf,
   totalsOf,
-  tournamentWinners,
   unseatPlayer,
 } from '@zhol/engine';
 import type { ErrorCode, PlayerView, ProtocolError, PublicState } from '@zhol/protocol';
@@ -208,13 +210,13 @@ export class RoomManager {
 
   // ---- seats ---------------------------------------------------------------
 
-  createRoom(nickname: string): { room: StoredRoom; seat: number; token: string } {
+  createRoom(nickname: string, mode: GameMode = 'klasik'): { room: StoredRoom; seat: number; token: string } {
     let code = generateRoomCode();
     for (let i = 0; this.get(code) || this.db.roomExists(code); i++) {
       if (i > 20) throw new Error('Could not allocate a room code');
       code = generateRoomCode();
     }
-    const seated = seatPlayer(createGame({ zholPenalty: this.options.zholPenalty }), 0);
+    const seated = seatPlayer(createGame({ zholPenalty: this.options.zholPenalty }, mode), 0);
     if (!seated.ok) throw new Error(seated.code);
     const now = Date.now();
     const room: StoredRoom = { code, version: 1, names: [nickname, null, null, null], bots: [false, false, false, false], game: seated.state, createdAt: now, updatedAt: now };
@@ -432,6 +434,7 @@ export class RoomManager {
       code: room.code,
       version: room.version,
       phase: g.phase,
+      mode: modeOf(g),
       roundNumber: g.roundNumber,
       totalRounds: roundCountOf(g),
       host: hostOf(room),
@@ -457,7 +460,7 @@ export class RoomManager {
       blockedDeals: g.blockedDeals,
       results: g.results,
       totals,
-      winners: g.phase === 'TOURNAMENT_COMPLETE' ? tournamentWinners(totals, playersOf(g)) : null,
+      winners: g.phase === 'TOURNAMENT_COMPLETE' ? gameWinners(g) : null,
       lastEvent: g.lastEvent,
       gameNumber: gameNumberOf(g),
       seriesWins: seriesWinsOf(g),

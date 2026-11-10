@@ -7,6 +7,7 @@ import {
   type DrawSource,
   type EngineErrorCode,
   type GameEvent,
+  type GameMode,
   type Phase,
   type RackEntry,
   type RevealedHand,
@@ -16,7 +17,7 @@ import {
   isValidTileId,
 } from '@zhol/engine';
 
-export type { DrawSource, GameEvent, Phase, RackEntry, RevealedHand, RoundResult, TileId };
+export type { DrawSource, GameEvent, GameMode, Phase, RackEntry, RevealedHand, RoundResult, TileId };
 
 // ---------------------------------------------------------------------------
 // Limits & formats
@@ -55,7 +56,11 @@ export const turnIdSchema = z.number().int().min(0).max(1_000_000);
 // Client → server payloads
 // ---------------------------------------------------------------------------
 
-export const createRoomPayload = z.object({ requestId: requestIdSchema, nickname: nicknameSchema }).strict();
+/** `klasik` = Zhol Klasik (default), `shpejte` = Zhol i Shpejtë: one round, whoever closes wins. */
+export const gameModeSchema = z.enum(['klasik', 'shpejte']);
+export const createRoomPayload = z
+  .object({ requestId: requestIdSchema, nickname: nicknameSchema, mode: gameModeSchema.optional() })
+  .strict();
 
 export const joinRoomPayload = z
   .object({
@@ -181,6 +186,8 @@ export interface PublicState {
   code: string;
   version: number;
   phase: Phase;
+  /** Zhol Klasik (rounds and points) or Zhol i Shpejtë (one round, the closer wins). */
+  mode: GameMode;
   roundNumber: number;
   /** One round per player. Before the start: the rounds a start right now would give. */
   totalRounds: number;

@@ -5,6 +5,7 @@ import type {
   Ack,
   ClientToServerEvents,
   DrawSource,
+  GameMode,
   PlayerView,
   ProtocolError,
   RoomJoined,
@@ -52,6 +53,13 @@ function storageSet(key: string, value: string | null) {
   }
 }
 export const savedName = () => storageGet(NAME_KEY) ?? '';
+export const MODE_KEY = 'zhol.mode';
+/** The game mode last picked on the main menu, or null for a first visit. */
+export const savedMode = (): GameMode | null => {
+  const m = storageGet(MODE_KEY);
+  return m === 'klasik' || m === 'shpejte' ? m : null;
+};
+export const rememberMode = (mode: GameMode) => storageSet(MODE_KEY, mode);
 export const hasSessionFor = (code: string) => storageGet(tokenKey(code)) !== null;
 
 function requestId(): string {
@@ -147,9 +155,10 @@ class ZholClient {
   }
 
   // ---- rooms ---------------------------------------------------------------
-  async createRoom(nickname: string): Promise<Ack<RoomJoined>> {
+  async createRoom(nickname: string, mode: GameMode = 'klasik'): Promise<Ack<RoomJoined>> {
     storageSet(NAME_KEY, nickname.trim());
-    const ack = await this.enqueue(() => this.emit<RoomJoined>('create_room', { requestId: requestId(), nickname }));
+    storageSet(MODE_KEY, mode);
+    const ack = await this.enqueue(() => this.emit<RoomJoined>('create_room', { requestId: requestId(), nickname, mode }));
     if (ack.ok) this.adopt(ack.data);
     return ack;
   }
