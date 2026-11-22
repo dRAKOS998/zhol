@@ -22,13 +22,12 @@ describe('game modes', () => {
     const legacy = createGame();
     delete legacy.mode;
     expect(modeOf(legacy)).toBe('klasik');
-    expect(roundCountOf({ ...legacy, players: [0, 1, 2] })).toBe(3);
+    expect(roundCountOf(legacy)).toBe(4);
   });
 
   it('Zhol i Shpejtë plays a single round at any table size', () => {
     const g = createGame({}, 'shpejte');
     expect(roundCountOf(g)).toBe(1);
-    expect(roundCountOf({ ...g, players: [0, 1, 2, 3] })).toBe(1);
   });
 
   it('Zhol i Shpejtë: whoever closes wins at once, and nobody gets points', () => {

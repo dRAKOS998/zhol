@@ -308,7 +308,7 @@ describe('gameplay over sockets', () => {
     }
   });
 
-  it('a blocked deal redeals the same round with the same starter and unchanged scores', async () => {
+  it('an empty stock without a close reshuffles every discard pile into a new stock and play goes on', async () => {
     const { players, server, code } = await table();
     server.testApi!.queueDealPlan(code, rigPlan([[...STARTER_WIN, 'y01a'], FULL_A, LOSER_ZERO, FULL_C]));
     await readyAll(players);
@@ -318,7 +318,7 @@ describe('gameplay over sockets', () => {
     let guard = 0;
     for (;;) {
       await sync(players, server, code);
-      if (players[0]!.state.dealId !== firstDeal || guard++ > 200) break;
+      if (players[0]!.state.lastEvent?.type === 'stock_reshuffled' || guard++ > 200) break;
       const active = bySeat(players, players[0]!.state.activeSeat!);
       const v = active.view!;
       if (v.state.phase === 'AWAITING_DRAW') {
@@ -333,13 +333,17 @@ describe('gameplay over sockets', () => {
       await players[0]!.until((x) => x.state.version > v.state.version);
     }
     const st = players[0]!.state;
-    expect(st.dealId).not.toBe(firstDeal);
+    const ev = st.lastEvent;
+    expect(ev?.type).toBe('stock_reshuffled');
+    expect(st.dealId).toBe(firstDeal);
     expect(st.starter).toBe(starterSeat);
     expect(st.roundNumber).toBe(1);
-    expect(st.blockedDeals).toBe(1);
     expect(st.results).toEqual([]);
-    expect(st.stockCount).toBe(48);
-    expect(st.lastEvent?.type).toBe('deal_blocked');
+    expect(st.phase).toBe('AWAITING_DRAW');
+    // 1 opening throw + 48 draws, each thrown back: all 49 now lie face down in the stock.
+    expect(st.stockCount).toBe(49);
+    expect(ev?.type === 'stock_reshuffled' && ev.count).toBe(49);
+    expect(st.seats.every((x) => x.discardCount === 0 && x.discardTop === null)).toBe(true);
   });
 });
 

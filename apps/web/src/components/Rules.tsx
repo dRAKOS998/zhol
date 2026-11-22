@@ -39,7 +39,7 @@ export function Rules() {
       <h3>Dy mënyra loje</h3>
       <ul>
         <li>
-          <strong>Zhol Klasik:</strong> luhen aq raunde sa ka lojtarë dhe pikët mblidhen. Fiton kush ka më pak pikë në fund.
+          <strong>Zhol Klasik:</strong> luhen 4 raunde, sido që të jetë numri i lojtarëve, dhe pikët mblidhen. Fiton kush ka më pak pikë në fund.
         </li>
         <li>
           <strong>Zhol i Shpejtë:</strong> luhet vetëm një raund, pa pikë. Fiton kush mbyll i pari.
@@ -53,14 +53,14 @@ export function Rules() {
           Të tjerët marrin pikët e gurëve që u mbeten pa lidhje, me renditjen më të mirë të mundshme: numri i shkruar mbi
           gur, 20 për një Zhol pa lidhje. P.sh. 5 e kuqe dhe 12 e zezë pa lidhje japin +17.
         </li>
-        <li>Luhen aq raunde sa ka lojtarë (2–4), që secili të fillojë një herë. Në fund fiton kush ka më pak pikë. Nëse disa kanë të njëjtin rezultat më të ulët, fitojnë bashkë.</li>
+        <li>Luhen gjithmonë 4 raunde, me 2, 3 ose 4 lojtarë. Në fund fiton kush ka më pak pikë. Nëse disa kanë të njëjtin rezultat më të ulët, fitojnë bashkë.</li>
       </ul>
-      <h3>Dorë e bllokuar</h3>
+      <h3>Kur mbaron stoku</h3>
       <p>
-        Kush tërheq gurin e fundit të stokut mund të mbyllë ende. Nëse ai thjesht hedh një gur, dora bllokohet: gurët
-        ndahen sërish për të njëjtin raund, me të njëjtin lojtar që fillon, dhe pikët nuk ndryshojnë.
+        Kush tërheq gurin e fundit të stokut mund të mbyllë ende. Nëse ai thjesht hedh një gur, gurët e hedhur të të gjithë
+        lojtarëve përzihen dhe bëhen stok i ri. Loja vazhdon me lojtarin tjetër, derisa dikush të mbyllë.
       </p>
-      <p>Fillimi kalon një vend në drejtim të akrepave pas çdo raundi të mbyllur, kështu çdo lojtar fillon një herë.</p>
+      <p>Fillimi kalon një vend në drejtim të akrepave pas çdo raundi të mbyllur.</p>
       <h3>Kur dikush largohet</h3>
       <p>
         Tavolina nuk ngec. Nëse një lojtar humb lidhjen ose nuk luan brenda kohës, kompjuteri luan për të derisa të

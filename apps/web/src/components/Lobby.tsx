@@ -138,7 +138,7 @@ export function Lobby({ state, mySeat }: { state: PublicState; mySeat: number })
   let hint: string;
   if (seated < state.minPlayers) hint = isHost ? 'Fto një shok me lidhjen ose shto një bot. Loja nis me 2 deri në 4 lojtarë.' : 'Duhet edhe të paktën një lojtar tjetër.';
   else if (isHost && humansWaiting.length) hint = `Po presim: ${humansWaiting.map((s) => s.name).join(', ')}.`;
-  else if (isHost) hint = quick ? `Gati për ${seated} lojtarë · një raund, kush mbyll fiton.` : `Gati për ${seated} lojtarë · ${seated} raunde.`;
+  else if (isHost) hint = quick ? `Gati për ${seated} lojtarë · një raund, kush mbyll fiton.` : `Gati për ${seated} lojtarë · 4 raunde.`;
   else hint = me.ready ? 'Pritësi do ta nisë lojën.' : 'Shtyp «Jam gati» kur të jesh gati.';
 
   return (

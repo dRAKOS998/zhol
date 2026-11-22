@@ -1624,6 +1624,57 @@ body {
   z-index: 1;
   transform: translate(6px, 5px) rotate(-3deg);
 }
+/* the discard piles were gathered back into the stock: the tiles riffle a few times */
+.stock.is-shuffling .stack-1 {
+  animation: riffle-a 0.42s ease-in-out 3;
+}
+.stock.is-shuffling .stack-2 {
+  animation: riffle-b 0.42s ease-in-out 3;
+}
+.stock.is-shuffling .stack-3 {
+  animation: riffle-c 0.42s ease-in-out 3;
+}
+.stock.is-shuffling .stock-count {
+  animation: pop 0.5s var(--spring) both 1.1s;
+}
+@keyframes riffle-a {
+  25% {
+    transform: translate(-16px, -4px) rotate(-12deg);
+  }
+  50% {
+    transform: translate(0, -9px) rotate(0deg);
+  }
+  75% {
+    transform: translate(14px, -3px) rotate(10deg);
+  }
+}
+@keyframes riffle-b {
+  25% {
+    transform: translate(17px, 1px) rotate(13deg);
+  }
+  50% {
+    transform: translate(3px, -5px) rotate(2deg);
+  }
+  75% {
+    transform: translate(-13px, 2px) rotate(-9deg);
+  }
+}
+@keyframes riffle-c {
+  33% {
+    transform: translate(-8px, 6px) rotate(-16deg);
+  }
+  66% {
+    transform: translate(18px, 2px) rotate(8deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .stock.is-shuffling .stack-1,
+  .stock.is-shuffling .stack-2,
+  .stock.is-shuffling .stack-3,
+  .stock.is-shuffling .stock-count {
+    animation: none;
+  }
+}
 .stock-count {
   position: absolute;
   z-index: 4;

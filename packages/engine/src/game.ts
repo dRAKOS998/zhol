@@ -6,7 +6,7 @@ import { type TileId, TOTAL_TILES, compareTileIds, createTileSet, isZhol } from 
 export const SEAT_COUNT = 4;
 export const MAX_PLAYERS = 4;
 export const MIN_PLAYERS = 2;
-/** Upper bound on rounds: one per player, so each player starts once. */
+/** Rounds in a Zhol Klasik tournament, whatever the number of players. */
 export const ROUND_COUNT = 4;
 export const SLOTS_PER_ROW = 12;
 export const RACK_SLOTS = SLOTS_PER_ROW * 2;
@@ -23,7 +23,7 @@ export type Phase = 'LOBBY' | 'AWAITING_DRAW' | 'AWAITING_DISCARD' | 'ROUND_RESU
 export type DrawSource = 'stock' | 'previous_discard';
 export type FinishType = 'normal' | 'zhol';
 /**
- * How a table plays. `klasik` (Zhol Klasik): one round per player, points add up, lowest total wins.
+ * How a table plays. `klasik` (Zhol Klasik): four rounds, points add up, lowest total wins.
  * `shpejte` (Zhol i Shpejtë): a single round, no points, whoever closes it wins.
  */
 export type GameMode = 'klasik' | 'shpejte';
@@ -78,7 +78,10 @@ export interface RoundResult {
 
 export type GameEvent =
   | { type: 'deal_started'; dealId: string; roundNumber: number; starter: number }
+  /** Legacy: older servers redealt when the stock ran out. Kept so saved states still read. */
   | { type: 'deal_blocked'; blockedDealId: string; dealId: string; roundNumber: number }
+  /** The stock ran out without a close: every discard pile was shuffled back into the stock. */
+  | { type: 'stock_reshuffled'; seat: number; tileId: TileId; count: number }
   | { type: 'drew'; seat: number; source: DrawSource }
   | { type: 'discarded'; seat: number; tileId: TileId }
   | { type: 'round_scored'; result: RoundResult }
@@ -182,12 +185,9 @@ export const modeOf = (state: Pick<GameState, 'mode'>): GameMode => state.mode ?
 /** Points count only in Zhol Klasik; Zhol i Shpejtë is decided by who closes. */
 export const isScored = (state: Pick<GameState, 'mode'>) => modeOf(state) === 'klasik';
 
-/** Rounds in this tournament: one per player in Zhol Klasik, so everyone starts once; one in Zhol i Shpejtë. */
-export function roundCountOf(state: Pick<GameState, 'players' | 'seated' | 'phase' | 'mode'>): number {
-  if (modeOf(state) === 'shpejte') return 1;
-  if (state.players) return state.players.length;
-  if (state.phase === 'LOBBY') return Math.max(MIN_PLAYERS, state.seated.filter(Boolean).length);
-  return ROUND_COUNT;
+/** Rounds in this tournament: always four in Zhol Klasik (at any table size), one in Zhol i Shpejtë. */
+export function roundCountOf(state: Pick<GameState, 'mode'>): number {
+  return modeOf(state) === 'shpejte' ? 1 : ROUND_COUNT;
 }
 
 /** Next seat clockwise among `players`. */
@@ -460,12 +460,11 @@ export function applyAction(state: GameState, seat: number, action: GameAction, 
       deal.turnId += 1;
       events.push({ type: 'discarded', seat, tileId: action.tileId });
       if (deal.stock.length === 0) {
-        // Stock exhausted and the player who drew the last tile did not close: blocked deal.
-        const blockedDealId = deal.dealId;
-        next.blockedDeals += 1;
-        startDeal(next, deal.starter, ctx);
-        events.push({ type: 'deal_blocked', blockedDealId, dealId: next.deal!.dealId, roundNumber: next.roundNumber });
-        return done();
+        // Stock exhausted and the player who drew the last tile did not close: every discard pile
+        // (the tile just thrown included) is shuffled into a new stock and play goes on.
+        deal.stock = shuffleInPlace(deal.discards.flat(), ctx.rng);
+        deal.discards = [[], [], [], []];
+        events.push({ type: 'stock_reshuffled', seat, tileId: action.tileId, count: deal.stock.length });
       }
       deal.active = nextSeat(seat, playersOf(next));
       next.phase = 'AWAITING_DRAW';

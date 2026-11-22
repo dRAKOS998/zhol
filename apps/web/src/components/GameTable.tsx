@@ -144,6 +144,12 @@ export function GameTable({ view, rack, status, deadline = null }: Props) {
   const [scoreOpen, setScoreOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
   const { flights, launch, done } = useFlights();
+  /** The stock is being shuffled after the discard piles were gathered back into it. */
+  const [shuffling, setShuffling] = useState(false);
+  const shuffleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (shuffleTimer.current) clearTimeout(shuffleTimer.current);
+  }, []);
 
   const inDeal = s.phase === 'AWAITING_DRAW' || s.phase === 'AWAITING_DISCARD';
   const myTurn = inDeal && s.activeSeat === me;
@@ -182,11 +188,9 @@ export function GameTable({ view, rack, status, deadline = null }: Props) {
   useEffect(() => {
     if (selected && !rack.some((e) => e.id === selected)) setSelected(null);
   }, [rack, selected]);
-  const blocked = s.lastEvent?.type === 'deal_blocked' && s.lastEvent.dealId === s.dealId && s.turnId === 1;
   useEffect(() => {
-    setMessage(blocked ? { text: 'Stoku mbaroi pa mbyllje: gurët u ndanë sërish.', tone: 'info' } : null);
+    setMessage(null);
     setScoreOpen(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [s.dealId]);
   // Messages float over the table for a few seconds, then go.
   useEffect(() => {
@@ -251,11 +255,44 @@ export function GameTable({ view, rack, status, deadline = null }: Props) {
           const shown = ev.source === 'previous_discard' ? b.seats[prevOf(ev.seat)]!.discardTop : null;
           if (from && to) reqs.push({ from, to: tileBoxIn(to, from.width * 0.7), tile: shown, arc: -50 });
         }
-      } else if (ev.type === 'discarded' && ev.seat !== me) {
+      } else if ((ev.type === 'discarded' || ev.type === 'stock_reshuffled') && ev.seat !== me) {
         // My own throws are already lying on the pile (see `parked`); only opponents' tiles fly.
         const to = anchorRect(`pile-${ev.seat}`);
         const from = anchorRect(`opp-${ev.seat}`);
         if (from && to) reqs.push({ from: tileBoxIn(from, to.width * 0.6), to, tile: ev.tileId, arc: -80, duration: 480 });
+      }
+      if (ev.type === 'stock_reshuffled') {
+        // The stock ran dry without a close: every pile is gathered onto the stock and shuffled.
+        setMessage({ text: 'Stoku mbaroi pa mbyllje: hedhjet u përzien dhe u bënë stok i ri.', tone: 'info' });
+        if (ev.seat === me && parkedRef.current) {
+          // My throw is no longer on my pile: it went into the new stock with the rest.
+          parkedRef.current = null;
+          setParked(null);
+          setLeaving(null);
+        }
+        const stock = anchorRect('stock');
+        let gather = 0;
+        if (stock) {
+          players.forEach((seat, k) => {
+            const pile = anchorRect(`pile-${seat}`);
+            const count = (b.seats[seat]?.discardCount ?? 0) + (seat === ev.seat ? 1 : 0);
+            if (!pile || !count) return;
+            const top = seat === ev.seat ? ev.tileId : (b.seats[seat]?.discardTop ?? null);
+            const flying = Math.min(4, count);
+            for (let i = 0; i < flying; i++) {
+              const delay = 520 + (k * flying + i) * 90;
+              gather = Math.max(gather, delay + 520);
+              reqs.push({ from: pile, to: stock, tile: i === 0 ? top : null, delay, duration: 520, arc: -50 });
+            }
+          });
+        }
+        if (!reducedMotion()) {
+          if (shuffleTimer.current) clearTimeout(shuffleTimer.current);
+          shuffleTimer.current = setTimeout(() => {
+            setShuffling(true);
+            shuffleTimer.current = setTimeout(() => setShuffling(false), 1700);
+          }, gather || 300);
+        }
       }
     }
     // The server has answered a throw of mine: the real pile (or the result) now shows the tile.
@@ -659,7 +696,7 @@ export function GameTable({ view, rack, status, deadline = null }: Props) {
               </div>
             ) : (
               <>
-                <div className={`stock ${canThrow ? 'can-close' : ''}`} data-drop={canThrow ? 'close' : undefined}>
+                <div className={`stock ${canThrow ? 'can-close' : ''} ${shuffling ? 'is-shuffling' : ''}`} data-drop={canThrow ? 'close' : undefined}>
                   {canThrow && selected ? (
                     <button type="button" className="stock-btn stock-close" data-anchor="stock" onClick={() => throwTile('close', selected)} aria-label={`Mbyll raundin duke vendosur ${tileLabel(selected)} mbi stok`}>
                       {stockStack}

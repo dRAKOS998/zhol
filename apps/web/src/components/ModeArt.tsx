@@ -5,7 +5,7 @@ export const MODE_INFO: Record<GameMode, { name: string; short: string; rule: st
   klasik: {
     name: 'Zhol Klasik',
     short: 'Klasik',
-    rule: 'Një raund për çdo lojtar. Pikët mblidhen, fiton kush ka më pak.',
+    rule: 'Katër raunde. Pikët mblidhen, fiton kush ka më pak.',
   },
   shpejte: {
     name: 'Zhol i Shpejtë',

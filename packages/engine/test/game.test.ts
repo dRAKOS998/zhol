@@ -10,6 +10,7 @@ import {
   isLegalLink,
   isZhol,
   nextSeat,
+  playersOf,
   previousSeat,
   rackIds,
   tilePenalty,
@@ -188,25 +189,27 @@ describe('stock exhaustion', () => {
     expect(r.state.results).toHaveLength(1);
   });
 
-  it('blocks the deal on an ordinary discard and redeals the same round with the same starter', () => {
+  it('reshuffles every discard pile into the stock on an ordinary discard, and play goes on', () => {
     const { state, ctx } = startGame([plan()]);
     const s = playOutStock(state, ctx);
     const d = dealOf(s);
+    const thrown = d.discards.flat().length + 1;
     const tile = d.racks[d.active]![0]!.id;
     const r = must(applyAction(s, d.active, { type: 'discard', tileId: tile, dealId: d.dealId, turnId: d.turnId }, ctx));
     const nd = dealOf(r.state);
-    expect(nd.dealId).not.toBe(d.dealId);
-    expect(nd.starter).toBe(d.starter);
-    expect(nd.roundNumber).toBe(1);
+    expect(nd.dealId).toBe(d.dealId);
     expect(r.state.roundNumber).toBe(1);
     expect(r.state.results).toEqual([]);
-    expect(r.state.blockedDeals).toBe(1);
-    expect(r.state.phase).toBe('AWAITING_DISCARD');
-    expect(nd.racks[nd.starter]).toHaveLength(15);
-    expect(nd.stock).toHaveLength(48);
-    expect(r.events.some((e) => e.type === 'deal_blocked')).toBe(true);
-    // a stale command for the blocked deal is rejected
-    expect(applyAction(r.state, nd.starter, { type: 'discard', tileId: nd.racks[nd.starter]![0]!.id, dealId: d.dealId, turnId: nd.turnId }, ctx)).toMatchObject({ code: 'STALE_DEAL' });
+    expect(r.state.phase).toBe('AWAITING_DRAW');
+    expect(nd.active).toBe(nextSeat(d.active, playersOf(r.state)));
+    expect(nd.stock).toHaveLength(thrown);
+    expect(nd.stock).toContain(tile);
+    expect(nd.discards.every((p) => p.length === 0)).toBe(true);
+    expect(nd.racks[d.active]).toHaveLength(14);
+    expect(r.state.lastEvent).toEqual({ type: 'stock_reshuffled', seat: d.active, tileId: tile, count: thrown });
+    // the next player draws from the new stock
+    const r2 = must(applyAction(r.state, nd.active, { type: 'draw', source: 'stock', dealId: nd.dealId, turnId: nd.turnId }, ctx));
+    expect(dealOf(r2.state).stock).toHaveLength(thrown - 1);
   });
 });
 

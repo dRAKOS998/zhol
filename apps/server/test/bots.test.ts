@@ -35,7 +35,7 @@ describe('2–4 player tables and bots', () => {
     expect(v.state.seats[1]).toMatchObject({ bot: true, ready: true, connected: true, name: 'Bot Arta' });
     expect(v.state.seats[3]).toMatchObject({ bot: true, name: 'Bot Drini' });
     expect(v.state.players).toEqual([0, 1, 3]);
-    expect(v.state.totalRounds).toBe(3);
+    expect(v.state.totalRounds).toBe(4);
     expect((await p.call('remove_bot', { requestId: rid(), seat: 1 })).ok).toBe(true);
     const after = await p.until((x) => !x.state.seats[1]!.name);
     expect(after.state.players).toEqual([0, 3]);
@@ -68,7 +68,7 @@ describe('2–4 player tables and bots', () => {
     expect((await p.call('start_game', { requestId: rid() })).ok).toBe(true);
     const v = await p.until((x) => x.state.phase !== 'LOBBY');
     expect(v.state.players).toEqual([0, 1]);
-    expect(v.state.totalRounds).toBe(2);
+    expect(v.state.totalRounds).toBe(4);
     expect(v.state.stockCount).toBe(76);
   });
 

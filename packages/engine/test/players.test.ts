@@ -125,10 +125,10 @@ describe('2–4 players', () => {
     [0, 2, 3],
     [0, 1, 2, 3],
   ]) {
-    it(`bots finish a ${seats.length}-player tournament with one round per player`, () => {
+    it(`bots finish a ${seats.length}-player tournament in four rounds`, () => {
       for (const seed of [11, 12]) {
         const { state } = playOut(seats, seed);
-        expect(state.results).toHaveLength(seats.length);
+        expect(state.results).toHaveLength(4);
         const starters = state.results.map((r) => r.winner);
         expect(starters.every((w) => seats.includes(w))).toBe(true);
         const last = state.results.at(-1)!;

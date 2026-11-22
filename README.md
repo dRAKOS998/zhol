@@ -1,6 +1,6 @@
 # Zhol
 
-A real-time tile game for 2–4 friends, with computer opponents to fill empty seats. One player creates a room, shares a single link (or adds bots), and the table plays one round per player so everyone starts once. The interface and in-game rules are in Albanian; code and developer docs are in English.
+A real-time tile game for 2–4 friends, with computer opponents to fill empty seats. One player creates a room, shares a single link (or adds bots), and the table plays four rounds (Zhol Klasik) whatever the number of players. The interface and in-game rules are in Albanian; code and developer docs are in English.
 
 The server is authoritative: clients send intents, the server validates them against a pure rules engine, commits to SQLite, and sends each player only the view they are allowed to see.
 
@@ -145,7 +145,7 @@ sudo systemctl start zhol
 
 ## Architecture notes
 
-- **Engine** (`packages/engine`): `applyAction(state, seat, action, ctx)` is a pure reducer returning a new state or an error code. Phases: `LOBBY → AWAITING_DISCARD/AWAITING_DRAW → ROUND_RESULT → … → TOURNAMENT_COMPLETE`. Randomness is injected (`crypto.randomInt` in production, a seeded generator in tests). Deals use Fisher–Yates and a uniformly chosen numbered indicator; every deal asserts 57 + 1 + 48 = 106.
+- **Engine** (`packages/engine`): `applyAction(state, seat, action, ctx)` is a pure reducer returning a new state or an error code. Phases: `LOBBY → AWAITING_DISCARD/AWAITING_DRAW → ROUND_RESULT → … → TOURNAMENT_COMPLETE`. Randomness is injected (`crypto.randomInt` in production, a seeded generator in tests). Deals use Fisher–Yates and a uniformly chosen numbered indicator; every deal asserts 57 + 1 + 48 = 106. When the stock runs dry without a close, all discard piles are shuffled into a new stock (`stock_reshuffled`) and play goes on in the same deal.
 - **Solver**: `evaluateHand` enumerates every legal run/set with physical tile IDs and wildcard assignments, then runs a memoized bitmask search over the lowest remaining tile (leave it unlinked, or place it in each fitting candidate). It returns the grouping, unlinked IDs, minimum penalty and full-cover flag, with a deterministic tie-break, and is the single source for both close validation and loser scoring. Tests compare it against an exhaustive reference on 600 random hands.
 - **Server**: commands are validated with zod, the acting seat comes from the socket binding (never the payload), and each mutation is one synchronous SQLite transaction (room state + immutable `round_results` row + idempotency record) committed before any broadcast. `(seat, requestId)` replays return the stored outcome; `dealId`/`turnId` reject stale commands; `sort_rack` never changes `turnId`. Seat credentials are 256-bit tokens stored only as SHA-256 hashes; invite links contain only the room code.
 - **Away players**: the server keeps one timer per room for whichever automatic move is due first: a bot's, or a human's whose time ran out (`RoomManager.autoJobs`). Who is connected and since when lives in memory only; after a restart everyone counts as just disconnected and gets the full wait. A seat the computer has played for is marked `away` and keeps moving after a short pause until its player sends any command, `player_back`, or reconnects.
@@ -156,7 +156,7 @@ sudo systemctl start zhol
 
 **Gurët.** 106 gurë: numrat 1–13 në katër ngjyra (e kuqe, e zezë, blu, e verdhë), nga dy kopje, plus dy gurë Zhol. Një gur numër kthehet si tregues: shërben vetëm për informacion. Vetëm dy gurët Zhol janë gurë të lirë.
 
-**Ndarja.** Ai që fillon merr 15 gurë dhe vetëm hedh një gur; të tjerët marrin 14. Lojtari i parë zgjidhet rastësisht, loja shkon në drejtim të akrepave dhe pas çdo raundi të mbyllur fillon lojtari tjetër, kështu secili fillon një herë.
+**Ndarja.** Ai që fillon merr 15 gurë dhe vetëm hedh një gur; të tjerët marrin 14. Lojtari i parë zgjidhet rastësisht, loja shkon në drejtim të akrepave dhe pas çdo raundi të mbyllur fillon lojtari tjetër.
 
 **Radha.** Tërhiq një gur nga stoku ose merr gurin e fundit që hodhi lojtari para teje, pastaj hidh një gur.
 
@@ -166,8 +166,8 @@ sudo systemctl start zhol
 
 **Pikët.** Kush mbyll: −20. Kush mbyll duke hedhur një Zhol: −40 (Zhol-i brenda lidhjeve nuk jep bonus). Të tjerët marrin shumën më të vogël të mundshme të gurëve pa lidhje: vlera e shkruar, 20 për një Zhol pa lidhje (p.sh. 5 e kuqe + 12 e zezë = +17). Rafti plotësisht i lidhur jep 0.
 
-**Dorë e bllokuar.** Kush tërheq gurin e fundit të stokut mund të mbyllë. Nëse vetëm hedh, dora bllokohet dhe gurët ndahen sërish për të njëjtin raund, me të njëjtin fillues; pikët nuk ndryshojnë.
+**Kur mbaron stoku.** Kush tërheq gurin e fundit të stokut mund të mbyllë. Nëse vetëm hedh, gurët e hedhur të të gjithë lojtarëve përzihen dhe bëhen stok i ri; loja vazhdon me lojtarin tjetër derisa dikush të mbyllë.
 
-**Fituesi.** Luhen aq raunde sa ka lojtarë (2–4). Në fund fiton kush ka më pak pikë. Nëse disa ndajnë rezultatin më të ulët, fitojnë bashkë. Me «Luaj sërish» të njëjtët lojtarë nisin një turne të ri nga zeroja.
+**Fituesi.** Luhen gjithmonë 4 raunde, me 2–4 lojtarë. Në fund fiton kush ka më pak pikë. Nëse disa ndajnë rezultatin më të ulët, fitojnë bashkë. Me «Luaj sërish» të njëjtët lojtarë nisin një turne të ri nga zeroja.
 
 **Kur dikush largohet.** Nëse një lojtar humb lidhjen ose nuk luan brenda kohës, kompjuteri luan për të derisa të kthehet.

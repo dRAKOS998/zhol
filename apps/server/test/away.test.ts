@@ -150,12 +150,12 @@ describe('rematch', () => {
     const { code } = await p.create('Arta');
     await p.call('add_bot', { requestId: rid() });
     await p.until((x) => x.state.seats[1]!.bot);
-    for (let i = 0; i < 4; i++) server.testApi!.queueDealPlan(code, quickDuoPlan());
+    for (let i = 0; i < 8; i++) server.testApi!.queueDealPlan(code, quickDuoPlan());
     expect((await p.call('start_game', { requestId: rid() })).ok).toBe(true);
 
     /** Whoever starts closes at once; ready up between rounds until the tournament is over. */
     const playOut = async () => {
-      for (let round = 0; round < 2; round++) {
+      for (let round = 0; round < 4; round++) {
         const v = await p.until((x) => (x.state.phase === 'AWAITING_DISCARD' && x.state.activeSeat === 0) || x.state.results.length > round);
         if (v.state.results.length === round) {
           expect((await p.call('declare_win', { requestId: rid(), ...turnArgs(v), tileId: 'y01a' })).ok).toBe(true);
@@ -166,8 +166,8 @@ describe('rematch', () => {
       return p.until((x) => x.state.phase === 'TOURNAMENT_COMPLETE');
     };
     const done = (await playOut()).state;
-    expect(done.results).toHaveLength(2);
-    expect(done.totals.slice(0, 2)).toEqual([-20, -20]);
+    expect(done.results).toHaveLength(4);
+    expect(done.totals.slice(0, 2)).toEqual([-40, -40]);
     expect(done).toMatchObject({ gameNumber: 1, seriesWins: [1, 1, 0, 0], winners: [0, 1] });
     for (const r of done.results) {
       expect(r.hands!.filter(Boolean)).toHaveLength(2);
@@ -186,12 +186,10 @@ describe('rematch', () => {
     // The second tournament's rounds are added to the ledger next to the first's.
     const second = (await playOut()).state;
     expect(second).toMatchObject({ gameNumber: 2, seriesWins: [2, 2, 0, 0] });
-    expect(server.db.results(code)).toHaveLength(4);
+    expect(server.db.results(code)).toHaveLength(8);
     expect(server.db.raw.prepare('SELECT game_number AS g, round_number AS r FROM round_results ORDER BY g, r').all()).toEqual([
-      { g: 1, r: 1 },
-      { g: 1, r: 2 },
-      { g: 2, r: 1 },
-      { g: 2, r: 2 },
+      ...[1, 2, 3, 4].map((r) => ({ g: 1, r })),
+      ...[1, 2, 3, 4].map((r) => ({ g: 2, r })),
     ]);
   });
 });
